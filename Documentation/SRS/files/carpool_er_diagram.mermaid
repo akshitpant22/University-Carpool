@@ -1,0 +1,133 @@
+erDiagram
+    UNIVERSITIES ||--o{ USERS : "has"
+    UNIVERSITIES ||--o{ RIDES : "scopes"
+    USERS ||--o{ VEHICLES : "owns"
+    USERS ||--o{ RIDES : "drives (driver_id)"
+    USERS ||--o{ RIDE_REQUESTS : "requests (rider_id)"
+    USERS ||--o{ RATINGS : "gives (rater_id)"
+    USERS ||--o{ RATINGS : "receives (ratee_id)"
+    USERS ||--o{ INCIDENT_LOGS : "attributed to"
+    USERS ||--o{ NOTIFICATIONS : "receives"
+    USERS ||--o{ MESSAGES : "sends (sender_id)"
+    USERS ||--o{ MESSAGES : "receives (receiver_id)"
+    VEHICLES ||--o{ RIDES : "used for"
+    RIDES ||--o{ RIDE_REQUESTS : "receives"
+    RIDES ||--o{ RATINGS : "generates"
+    RIDES ||--o{ INCIDENT_LOGS : "generates"
+    RIDES ||--o{ NOTIFICATIONS : "related to"
+    RIDES ||--o{ MESSAGES : "coordinates via"
+
+    UNIVERSITIES {
+        UUID id PK
+        TEXT name
+        TEXT email_domain UK
+        TIMESTAMPTZ created_at
+    }
+
+    USERS {
+        UUID id PK
+        UUID university_id FK
+        TEXT name
+        TEXT email UK
+        TEXT phone_number
+        TEXT parent_contact_number
+        TEXT student_id_number
+        TEXT branch
+        TEXT course
+        INT year
+        INT semester
+        ENUM role
+        ENUM verification_status
+        TEXT id_card_image_url
+        TEXT profile_photo_url
+        TEXT upi_id
+        TEXT dl_number
+        BOOLEAN dl_verified
+        DECIMAL composite_rating
+        INT completed_rides_count
+        INT no_show_count
+        INT late_cancellation_count
+        TIMESTAMPTZ deleted_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    VEHICLES {
+        UUID id PK
+        UUID user_id FK
+        ENUM vehicle_type
+        INT seat_capacity
+        TEXT vehicle_number
+        TIMESTAMPTZ created_at
+    }
+
+    RIDES {
+        UUID id PK
+        UUID driver_id FK
+        UUID vehicle_id FK
+        UUID university_id FK
+        GEOGRAPHY origin_point
+        TEXT origin_address_text
+        GEOGRAPHY destination_point
+        TIMESTAMPTZ departure_time
+        INT available_seats
+        DECIMAL price_per_seat
+        ENUM gender_preference
+        ENUM status
+        TIMESTAMPTZ posted_at
+        TIMESTAMPTZ deleted_at
+        TIMESTAMPTZ created_at
+    }
+
+    RIDE_REQUESTS {
+        UUID id PK
+        UUID ride_id FK
+        UUID rider_id FK
+        ENUM status
+        TIMESTAMPTZ requested_at
+        TIMESTAMPTZ expiry_at
+        TIMESTAMPTZ responded_at
+        BOOLEAN gender_filter_applied
+        TIMESTAMPTZ deleted_at
+        TIMESTAMPTZ created_at
+    }
+
+    RATINGS {
+        UUID id PK
+        UUID ride_id FK
+        UUID rater_id FK
+        UUID ratee_id FK
+        INT stars
+        TEXT comment
+        TIMESTAMPTZ created_at
+    }
+
+    INCIDENT_LOGS {
+        UUID id PK
+        UUID ride_id FK
+        UUID user_id FK
+        ENUM incident_type
+        ENUM stage
+        TEXT notes
+        TIMESTAMPTZ created_at
+    }
+
+    NOTIFICATIONS {
+        UUID id PK
+        UUID user_id FK
+        ENUM type
+        TEXT title
+        TEXT body
+        UUID related_ride_id FK
+        BOOLEAN is_read
+        TIMESTAMPTZ created_at
+    }
+
+    MESSAGES {
+        UUID id PK
+        UUID ride_id FK
+        UUID sender_id FK
+        UUID receiver_id FK
+        TEXT content
+        TIMESTAMPTZ sent_at
+    }
