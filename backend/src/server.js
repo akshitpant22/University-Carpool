@@ -5,6 +5,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 
+// Import Routes
+import authRoutes from './routes/auth.routes.js';
+import userRoutes from './routes/user.routes.js';
+
 dotenv.config();
 
 const app = express();
@@ -54,19 +58,41 @@ io.on('connection', (socket) => {
   });
 });
 
-// Health check endpoint
+// API Routes
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/users', userRoutes);
+
+// System Health Check
 app.get('/api/v1/health', (req, res) => {
   res.status(200).json({
     success: true,
     data: {
       status: 'healthy',
+      service: 'campus-carpool-backend',
       timestamp: new Date().toISOString()
     }
   });
 });
 
+// 404 Handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: { code: 'NOT_FOUND', message: `Route ${req.method} ${req.url} does not exist.` }
+  });
+});
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('[Unhandled Error]:', err);
+  res.status(500).json({
+    success: false,
+    error: { code: 'INTERNAL_SERVER_ERROR', message: err.message || 'Something went wrong.' }
+  });
+});
+
 server.listen(PORT, () => {
-  console.log(`[Server] Campus Carpool API running on port ${PORT}`);
+  console.log(`[Server] Campus Carpool API running on http://localhost:${PORT}`);
 });
 
 export { app, io };
