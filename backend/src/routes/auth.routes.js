@@ -41,18 +41,48 @@ router.post('/signup', async (req, res) => {
     const domain = emailParts[1];
 
     // Check against universities table in Supabase
-    const { data: university, error: uniError } = await supabaseAdmin
+    let { data: university, error: uniError } = await supabaseAdmin
       .from('universities')
       .select('id, name, email_domain')
       .eq('email_domain', domain)
       .single();
 
-    if (uniError || !university) {
+    // If query failed due to fetch error / bad env configuration
+    if (uniError && uniError.message?.includes('fetch failed')) {
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'DB_CONNECTION_ERROR',
+          message: 'Backend cannot connect to Supabase. Please ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in backend/.env are filled and saved.'
+        }
+      });
+    }
+
+    // Auto-seed GEHU if it's gehu.ac.in and seed was not run yet
+    if (!university && domain === 'gehu.ac.in') {
+      const { data: seededUni, error: seedError } = await supabaseAdmin
+        .from('universities')
+        .insert({
+          id: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
+          name: 'Graphic Era Hill University, Dehradun',
+          email_domain: 'gehu.ac.in'
+        })
+        .select('*')
+        .single();
+
+      if (seededUni) {
+        university = seededUni;
+      } else if (seedError) {
+        console.warn('[Signup] Auto-seed error:', seedError);
+      }
+    }
+
+    if (!university) {
       return res.status(400).json({
         success: false,
         error: {
           code: 'UNAUTHORIZED_DOMAIN',
-          message: `Registration is restricted to verified university domains (e.g. @gehu.ac.in). Domain '@${domain}' is not authorized.`
+          message: `Registration is restricted to verified university domains (e.g. @gehu.ac.in). Domain '@${domain}' is not registered.`
         }
       });
     }
@@ -98,11 +128,10 @@ router.post('/signup', async (req, res) => {
 
     if (profileError) {
       console.error('[Signup] Error inserting user profile:', profileError);
-      // Rollback auth user creation if profile insert failed
       await supabaseAdmin.auth.admin.deleteUser(userId);
       return res.status(500).json({
         success: false,
-        error: { code: 'DB_ERROR', message: 'Failed to create student profile record.' }
+        error: { code: 'DB_ERROR', message: 'Failed to create student profile record: ' + profileError.message }
       });
     }
 
@@ -118,7 +147,7 @@ router.post('/signup', async (req, res) => {
     console.error('[Signup] Unexpected error:', err);
     return res.status(500).json({
       success: false,
-      error: { code: 'SERVER_ERROR', message: 'Internal server error during registration.' }
+      error: { code: 'SERVER_ERROR', message: err.message || 'Internal server error during registration.' }
     });
   }
 });
@@ -150,7 +179,6 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Fetch user profile
     const { data: profile } = await supabaseAdmin
       .from('users')
       .select('*')
