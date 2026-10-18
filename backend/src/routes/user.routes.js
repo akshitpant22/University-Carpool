@@ -125,13 +125,41 @@ router.patch('/me', verifyAuth, async (req, res) => {
  */
 router.post('/me/id-card', verifyAuth, async (req, res) => {
   try {
-    const { storage_path } = req.body;
+    let { storage_path, file_base64, file_ext } = req.body;
 
-    if (!storage_path) {
+    if (!storage_path && !file_base64) {
       return res.status(400).json({
         success: false,
-        error: { code: 'MISSING_PATH', message: 'storage_path is required.' }
+        error: { code: 'MISSING_DATA', message: 'Either storage_path or file_base64 is required.' }
       });
+    }
+
+    // If base64 file data is passed, upload using supabaseAdmin (bypasses RLS)
+    if (file_base64) {
+      const ext = file_ext || 'jpg';
+      const fileName = `${req.user.id}/student_id_${Date.now()}.${ext}`;
+      const buffer = Buffer.from(file_base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+
+      // Try 'id_cards' first, then 'id-cards'
+      let uploadResult = await supabaseAdmin.storage
+        .from('id_cards')
+        .upload(fileName, buffer, { contentType: `image/${ext}`, upsert: true });
+
+      if (uploadResult.error) {
+        uploadResult = await supabaseAdmin.storage
+          .from('id-cards')
+          .upload(fileName, buffer, { contentType: `image/${ext}`, upsert: true });
+      }
+
+      if (uploadResult.error) {
+        console.error('[POST /users/me/id-card] Storage upload error:', uploadResult.error);
+        return res.status(500).json({
+          success: false,
+          error: { code: 'UPLOAD_FAILED', message: uploadResult.error.message }
+        });
+      }
+
+      storage_path = fileName;
     }
 
     const { data: updatedUser, error } = await supabaseAdmin

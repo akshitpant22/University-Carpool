@@ -1,8 +1,8 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Car, ShieldCheck, Clock, User, LogOut } from 'lucide-react';
+import { Car, ShieldCheck, Clock, User, LogOut, PlusCircle, Compass } from 'lucide-react';
 
-export default function Navbar({ onOpenAuth, onOpenIdUpload }) {
+export default function Navbar({ onOpenAuth, onOpenIdUpload, onOpenVehicles, onOpenMyRides }) {
   const { user, profile, logout } = useAuth();
 
   return (
@@ -10,7 +10,7 @@ export default function Navbar({ onOpenAuth, onOpenIdUpload }) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '16px 24px',
+      padding: '14px 24px',
       background: '#ffffff',
       borderBottom: '1px solid #e2e8f0',
       position: 'sticky',
@@ -41,17 +41,58 @@ export default function Navbar({ onOpenAuth, onOpenIdUpload }) {
         </div>
       </div>
 
-      {/* Auth Controls */}
+      {/* Nav Actions & Auth Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {user ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            {/* Status Badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Quick Navigation Links */}
+            <button
+              onClick={onOpenVehicles}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.825rem',
+                fontWeight: '600',
+                background: '#f8fafc',
+                border: '1px solid #cbd5e1',
+                color: '#334155',
+                cursor: 'pointer'
+              }}
+            >
+              <Car size={15} color="#2563eb" />
+              <span>My Vehicles</span>
+            </button>
+
+            <button
+              onClick={onOpenMyRides}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.825rem',
+                fontWeight: '600',
+                background: '#f8fafc',
+                border: '1px solid #cbd5e1',
+                color: '#334155',
+                cursor: 'pointer'
+              }}
+            >
+              <Compass size={15} color="#2563eb" />
+              <span>My Rides</span>
+            </button>
+
+            {/* Verification Status Badge */}
             {profile?.verification_status === 'verified' ? (
               <span style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '5px',
-                padding: '4px 10px',
+                padding: '5px 10px',
                 borderRadius: '9999px',
                 fontSize: '0.75rem',
                 fontWeight: '600',
@@ -68,7 +109,7 @@ export default function Navbar({ onOpenAuth, onOpenIdUpload }) {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '5px',
-                  padding: '4px 10px',
+                  padding: '5px 10px',
                   borderRadius: '9999px',
                   fontSize: '0.75rem',
                   fontWeight: '600',
@@ -83,11 +124,11 @@ export default function Navbar({ onOpenAuth, onOpenIdUpload }) {
             )}
 
             {/* User Details */}
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontWeight: '600', fontSize: '0.9rem', color: '#0f172a' }}>
+            <div style={{ textAlign: 'right', marginLeft: '4px' }}>
+              <div style={{ fontWeight: '700', fontSize: '0.875rem', color: '#0f172a' }}>
                 {profile?.name || user.email.split('@')[0]}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+              <div style={{ fontSize: '0.725rem', color: '#64748b' }}>
                 {profile?.branch ? `${profile.course || 'Student'} • ${profile.branch}` : user.email}
               </div>
             </div>
@@ -107,7 +148,7 @@ export default function Navbar({ onOpenAuth, onOpenIdUpload }) {
                 alignItems: 'center'
               }}
             >
-              <LogOut size={18} />
+              <LogOut size={16} />
             </button>
           </div>
         ) : (

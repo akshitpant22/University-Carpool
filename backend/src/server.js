@@ -8,6 +8,8 @@ import dotenv from 'dotenv';
 // Import Routes
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
+import vehicleRoutes from './routes/vehicle.routes.js';
+import rideRoutes from './routes/ride.routes.js';
 
 dotenv.config();
 
@@ -23,7 +25,8 @@ app.use(cors({
   origin: CLIENT_URL,
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Socket.IO Setup
 const io = new Server(server, {
@@ -61,6 +64,8 @@ io.on('connection', (socket) => {
 // API Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/vehicles', vehicleRoutes);
+app.use('/api/v1/rides', rideRoutes);
 
 // System Health Check
 app.get('/api/v1/health', (req, res) => {
