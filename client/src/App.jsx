@@ -3,25 +3,51 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import AuthModal from './components/AuthModal';
 import IdCardModal from './components/IdCardModal';
-import { Search, PlusCircle, ShieldCheck, AlertTriangle, ArrowRight, MapPin, Users, HeartHandshake } from 'lucide-react';
+import VehicleModal from './components/VehicleModal';
+import PostRideModal from './components/PostRideModal';
+import MyRidesModal from './components/MyRidesModal';
+import {
+  Search,
+  PlusCircle,
+  ShieldCheck,
+  AlertTriangle,
+  ArrowRight,
+  MapPin,
+  Users,
+  HeartHandshake,
+  Car,
+  Compass
+} from 'lucide-react';
 
 function Dashboard() {
   const { user, profile } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isIdUploadOpen, setIsIdUploadOpen] = useState(false);
+  const [isVehicleOpen, setIsVehicleOpen] = useState(false);
+  const [isPostRideOpen, setIsPostRideOpen] = useState(false);
+  const [isMyRidesOpen, setIsMyRidesOpen] = useState(false);
 
-  const handleAction = (actionType) => {
+  const handleFindRide = () => {
+    if (!user) {
+      setIsAuthOpen(true);
+      return;
+    }
+    alert('Find a Ride (Search & Matching Engine with ML Microservice) will be activated in Milestone 3!');
+  };
+
+  const handleOfferRide = () => {
     if (!user) {
       setIsAuthOpen(true);
       return;
     }
 
     if (profile?.verification_status !== 'verified') {
+      alert('Your student verification is currently under review by campus administration. Once approved, you can offer rides!');
       setIsIdUploadOpen(true);
       return;
     }
 
-    alert(`Action: ${actionType} - Module ready for Milestone 2 & 3!`);
+    setIsPostRideOpen(true);
   };
 
   return (
@@ -29,6 +55,8 @@ function Dashboard() {
       <Navbar
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenIdUpload={() => setIsIdUploadOpen(true)}
+        onOpenVehicles={() => user ? setIsVehicleOpen(true) : setIsAuthOpen(true)}
+        onOpenMyRides={() => user ? setIsMyRidesOpen(true) : setIsAuthOpen(true)}
       />
 
       <main style={{ flex: 1, maxWidth: '1000px', width: '100%', margin: '0 auto', padding: '32px 20px' }}>
@@ -52,7 +80,7 @@ function Dashboard() {
                 </div>
                 <div style={{ fontSize: '0.825rem', color: '#b45309' }}>
                   {profile?.id_card_image_url
-                    ? 'Your ID card is being verified by campus administration. You currently have read-only access.'
+                    ? 'Your Student ID card is under administrative review. Once verified, ride posting is instantly unlocked!'
                     : 'Action required: Upload your Student ID card to unlock ride posting and booking.'}
                 </div>
               </div>
@@ -116,7 +144,7 @@ function Dashboard() {
           </p>
         </section>
 
-        {/* Primary Equal-Weight Action Cards (As specified in SRS) */}
+        {/* Primary Equal-Weight Action Cards (As specified in SRS PRD Section 4) */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
@@ -157,7 +185,7 @@ function Dashboard() {
               </p>
             </div>
             <button
-              onClick={() => handleAction('find_ride')}
+              onClick={handleFindRide}
               style={{
                 width: '100%',
                 padding: '14px',
@@ -213,7 +241,7 @@ function Dashboard() {
               </p>
             </div>
             <button
-              onClick={() => handleAction('offer_ride')}
+              onClick={handleOfferRide}
               style={{
                 width: '100%',
                 padding: '14px',
@@ -235,6 +263,73 @@ function Dashboard() {
             </button>
           </div>
         </div>
+
+        {/* Quick Driver Tools Banner (When logged in) */}
+        {user && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
+            padding: '18px 22px',
+            borderRadius: '12px',
+            marginBottom: '40px',
+            gap: '16px',
+            flexWrap: 'wrap'
+          }}>
+            <div>
+              <div style={{ fontWeight: '700', fontSize: '0.95rem', color: '#0f172a' }}>
+                Driver Quick Hub
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                Manage your registered commute vehicles and review active or past posted campus rides.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setIsVehicleOpen(true)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  background: '#f1f5f9',
+                  border: '1px solid #cbd5e1',
+                  color: '#1e293b',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Car size={16} color="#2563eb" />
+                <span>My Vehicles</span>
+              </button>
+
+              <button
+                onClick={() => setIsMyRidesOpen(true)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  background: '#f1f5f9',
+                  border: '1px solid #cbd5e1',
+                  color: '#1e293b',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Compass size={16} color="#2563eb" />
+                <span>My Rides</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Community Trust Features */}
         <div style={{
@@ -280,6 +375,23 @@ function Dashboard() {
       <IdCardModal
         isOpen={isIdUploadOpen}
         onClose={() => setIsIdUploadOpen(false)}
+      />
+
+      <VehicleModal
+        isOpen={isVehicleOpen}
+        onClose={() => setIsVehicleOpen(false)}
+      />
+
+      <PostRideModal
+        isOpen={isPostRideOpen}
+        onClose={() => setIsPostRideOpen(false)}
+        onOpenVehicleModal={() => setIsVehicleOpen(true)}
+        onRidePosted={() => setIsMyRidesOpen(true)}
+      />
+
+      <MyRidesModal
+        isOpen={isMyRidesOpen}
+        onClose={() => setIsMyRidesOpen(false)}
       />
     </div>
   );
