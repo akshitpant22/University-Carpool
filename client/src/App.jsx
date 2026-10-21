@@ -6,6 +6,8 @@ import IdCardModal from './components/IdCardModal';
 import VehicleModal from './components/VehicleModal';
 import PostRideModal from './components/PostRideModal';
 import MyRidesModal from './components/MyRidesModal';
+import SearchRideModal from './components/SearchRideModal';
+import SearchResultsModal from './components/SearchResultsModal';
 import {
   Search,
   PlusCircle,
@@ -26,14 +28,25 @@ function Dashboard() {
   const [isVehicleOpen, setIsVehicleOpen] = useState(false);
   const [isPostRideOpen, setIsPostRideOpen] = useState(false);
   const [isMyRidesOpen, setIsMyRidesOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isResultsOpen, setIsResultsOpen] = useState(false);
+  const [searchData, setSearchData] = useState(null);
+  const [searchMeta, setSearchMeta] = useState(null);
 
   const handleFindRide = () => {
     if (!user) {
       setIsAuthOpen(true);
       return;
     }
-    alert('Find a Ride (Search & Matching Engine with ML Microservice) will be activated in Milestone 3!');
+    setIsSearchOpen(true);
   };
+
+  const handleSearchResults = (data, meta) => {
+    setSearchData(data);
+    setSearchMeta(meta);
+    setIsResultsOpen(true);
+  };
+
 
   const handleOfferRide = () => {
     if (!user) {
@@ -392,6 +405,20 @@ function Dashboard() {
       <MyRidesModal
         isOpen={isMyRidesOpen}
         onClose={() => setIsMyRidesOpen(false)}
+      />
+
+      <SearchRideModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onSearchResults={handleSearchResults}
+      />
+
+      <SearchResultsModal
+        isOpen={isResultsOpen}
+        onClose={() => setIsResultsOpen(false)}
+        searchData={searchData}
+        searchMeta={searchMeta}
+        onModifySearch={() => setIsSearchOpen(true)}
       />
     </div>
   );

@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { verifyAuth, requireVerified } from '../middleware/auth.js';
+import { rankCandidateRides } from '../services/matching.service.js';
 
 const router = express.Router();
 
@@ -98,18 +99,26 @@ router.post('/', verifyAuth, requireVerified, async (req, res) => {
       });
     }
 
-    // 5. Origin Coordinates & PostGIS Point
-    if (!origin_address_text || !origin_address_text.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'ORIGIN_REQUIRED', message: 'Origin pickup landmark/address is required.' }
-      });
-    }
-
+    // 5. Commute Direction & Coordinates (Anchor to GEHU Campus)
+    const isFromCampus = req.body.commute_direction === 'from_campus';
     const lng = origin_lng !== undefined ? parseFloat(origin_lng) : GEHU_CAMPUS_LNG;
     const lat = origin_lat !== undefined ? parseFloat(origin_lat) : GEHU_CAMPUS_LAT;
-    const originPointWKT = `POINT(${lng} ${lat})`;
-    const destPointWKT = `POINT(${GEHU_CAMPUS_LNG} ${GEHU_CAMPUS_LAT})`;
+
+    let originPointWKT;
+    let destPointWKT;
+    let formattedOriginText;
+
+    if (isFromCampus) {
+      // Return commute: Driver starts at GEHU Campus and drops peers off on way to destination
+      originPointWKT = `POINT(${GEHU_CAMPUS_LNG} ${GEHU_CAMPUS_LAT})`;
+      destPointWKT = `POINT(${lng} ${lat})`;
+      formattedOriginText = `GEHU Campus → ${origin_address_text.trim()}`;
+    } else {
+      // Morning / Exam commute: Driver starts at home landmark and heads towards GEHU Campus
+      originPointWKT = `POINT(${lng} ${lat})`;
+      destPointWKT = `POINT(${GEHU_CAMPUS_LNG} ${GEHU_CAMPUS_LAT})`;
+      formattedOriginText = origin_address_text.trim();
+    }
 
     // 6. Price & Gender Preference
     const parsedPrice = price_per_seat !== undefined && price_per_seat !== null && price_per_seat !== ''
@@ -128,7 +137,7 @@ router.post('/', verifyAuth, requireVerified, async (req, res) => {
         vehicle_id: vehicle.id,
         university_id: req.user.profile?.university_id || 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
         origin_point: originPointWKT,
-        origin_address_text: origin_address_text.trim(),
+        origin_address_text: formattedOriginText,
         destination_point: destPointWKT,
         departure_time: depDate.toISOString(),
         available_seats: seatCount,
@@ -137,6 +146,7 @@ router.post('/', verifyAuth, requireVerified, async (req, res) => {
         status: 'posted'
       })
       .select('*, vehicles (*)')
+
       .single();
 
     if (insertErr) {
@@ -198,6 +208,162 @@ router.get('/mine', verifyAuth, async (req, res) => {
     });
   }
 });
+
+/**
+ * GET /api/v1/rides/search
+ * Milestone 3: Rider Search & Detour Matching Engine
+ * Runs: PostGIS detour proximity -> Mutual gender filter -> ML address similarity -> 50/50 fusion ranking
+ */
+router.get('/search', verifyAuth, async (req, res) => {
+  try {
+    const {
+      pickup_lat,
+      pickup_lng,
+      pickup_address_text,
+      departure_time,
+      time_window_minutes = 180,
+      max_detour_meters = 1500,
+      gender_preference = 'no_preference',
+      rider_gender,
+      commute_direction = 'all',
+      flexible_time = 'false',
+      exclude_own = 'false'
+    } = req.query;
+
+    // Time window calculation:
+    // If departure_time provided and not in flexible mode, check within window (+- 12 hours)
+    // Otherwise, check all active upcoming rides from current time onwards
+    let depWindowStart;
+    let depWindowEnd;
+
+    const isFlexible = flexible_time === 'true' || !departure_time;
+
+    if (!isFlexible && departure_time) {
+      const targetTime = new Date(departure_time);
+      if (!isNaN(targetTime.getTime())) {
+        // Broaden search to +- 12 hours of the selected departure day
+        depWindowStart = new Date(targetTime.getTime() - 12 * 60 * 60 * 1000).toISOString();
+        depWindowEnd = new Date(targetTime.getTime() + 12 * 60 * 60 * 1000).toISOString();
+      }
+    }
+
+    if (!depWindowStart) {
+      // Default: all active upcoming rides (from 30 mins ago up to 72 hours ahead)
+      depWindowStart = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      depWindowEnd = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    }
+
+    // Step 1: Base database query for active rides
+    let query = supabaseAdmin
+      .from('rides')
+      .select(`
+        *,
+        vehicles ( id, vehicle_type, vehicle_number, seat_capacity ),
+        users!rides_driver_id_fkey ( id, name, branch, course, profile_photo_url, composite_rating, completed_rides_count )
+      `)
+      .eq('status', 'posted')
+      .is('deleted_at', null)
+      .gt('available_seats', 0)
+      .gte('departure_time', depWindowStart)
+      .lte('departure_time', depWindowEnd);
+
+    // Only exclude rider's own rides if explicitly requested (in testing/driver view, we tag is_own_ride)
+    if (exclude_own === 'true' && req.user?.id) {
+      query = query.neq('driver_id', req.user.id);
+    }
+
+    let { data: rawRides, error: fetchErr } = await query;
+
+    // Fallback: If no rides match the strict time window, expand to all upcoming rides
+    if ((!rawRides || rawRides.length === 0) && !isFlexible) {
+      const fallbackQuery = await supabaseAdmin
+        .from('rides')
+        .select(`
+          *,
+          vehicles ( id, vehicle_type, vehicle_number, seat_capacity ),
+          users!rides_driver_id_fkey ( id, name, branch, course, profile_photo_url, composite_rating, completed_rides_count )
+        `)
+        .eq('status', 'posted')
+        .is('deleted_at', null)
+        .gt('available_seats', 0)
+        .gte('departure_time', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+        .order('departure_time', { ascending: true });
+
+      if (fallbackQuery.data && fallbackQuery.data.length > 0) {
+        rawRides = fallbackQuery.data;
+      }
+    }
+
+    if (fetchErr && (!rawRides || rawRides.length === 0)) {
+      console.error('[GET /rides/search] DB query error:', fetchErr);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'SEARCH_FAILED', message: fetchErr.message }
+      });
+    }
+
+    // Enrich driver gender so mutual gender compatibility filter accurately matches same_gender_only rides
+    const safeRawRides = await Promise.all((rawRides || []).map(async (r) => {
+      let driverGender = r.users?.gender || r.driver_gender;
+      if (!driverGender) {
+        if (req.user?.id && r.driver_id === req.user.id) {
+          driverGender = req.user?.profile?.gender || req.user?.user_metadata?.gender || 'male';
+        } else {
+          try {
+            const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(r.driver_id);
+            driverGender = authUser?.user?.user_metadata?.gender || 'male';
+          } catch {
+            driverGender = 'male';
+          }
+        }
+      }
+      return {
+        ...r,
+        driver_gender: driverGender,
+        users: {
+          ...(r.users || {}),
+          gender: driverGender
+        }
+      };
+    }));
+
+    // Step 2 & 3: Run through Matching Engine (Route Corridor Detour, Gender, ML similarity, 50/50 Fusion)
+    const { rankedRides, excludedByGenderCount } = await rankCandidateRides(safeRawRides, {
+      pickup_lat,
+      pickup_lng,
+      pickup_address_text: pickup_address_text || '',
+      max_detour_meters: parseFloat(max_detour_meters) || 1500,
+      gender_preference,
+      rider_gender: rider_gender || req.user?.profile?.gender || req.user?.user_metadata?.gender || 'male',
+      commute_direction,
+      current_user_id: req.user?.id || null
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        results: rankedRides,
+        total_matches: rankedRides.length,
+        excluded_by_gender_count: excludedByGenderCount,
+        query: {
+          pickup_address_text: pickup_address_text || '',
+          pickup_lat: pickup_lat ? parseFloat(pickup_lat) : null,
+          pickup_lng: pickup_lng ? parseFloat(pickup_lng) : null,
+          max_detour_meters: parseFloat(max_detour_meters) || 1500,
+          gender_preference,
+          commute_direction
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[GET /rides/search] Unexpected error:', err);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'SERVER_ERROR', message: 'Failed to execute ride search.' }
+    });
+  }
+});
+
 
 /**
  * GET /api/v1/rides/:id

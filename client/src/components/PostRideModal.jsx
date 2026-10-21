@@ -38,6 +38,7 @@ export default function PostRideModal({ isOpen, onClose, onOpenVehicleModal, onR
   const [success, setSuccess] = useState('');
 
   // Form states
+  const [commuteDirection, setCommuteDirection] = useState('to_campus'); // 'to_campus' | 'from_campus'
   const [originType, setOriginType] = useState('hub'); // 'hub' | 'custom'
   const [selectedHub, setSelectedHub] = useState(POPULAR_DEHRADUN_HUBS[0].name);
   const [customOrigin, setCustomOrigin] = useState('');
@@ -47,6 +48,7 @@ export default function PostRideModal({ isOpen, onClose, onOpenVehicleModal, onR
   const [pricePerSeat, setPricePerSeat] = useState('30');
   const [genderPreference, setGenderPreference] = useState('no_preference');
   const [dlNumber, setDlNumber] = useState('');
+
 
   // Initialize minimum departure time (10 mins from now)
   const getMinDateTime = () => {
@@ -143,6 +145,7 @@ export default function PostRideModal({ isOpen, onClose, onOpenVehicleModal, onR
     try {
       const payload = {
         vehicle_id: selectedVehicle.id,
+        commute_direction: commuteDirection,
         origin_address_text: originText,
         origin_lat: originLat,
         origin_lng: originLng,
@@ -156,6 +159,7 @@ export default function PostRideModal({ isOpen, onClose, onOpenVehicleModal, onR
       const res = await api.post('/rides', payload);
 
       if (res.success) {
+
         setSuccess('Ride posted successfully! Peers can now discover your ride.');
         if (refreshProfile) refreshProfile();
         setTimeout(() => {
@@ -380,12 +384,81 @@ export default function PostRideModal({ isOpen, onClose, onOpenVehicleModal, onR
               </div>
             </div>
 
-            {/* Origin Selection */}
+            {/* Commute Direction Toggle (Anchored strictly to GEHU Campus) */}
+            <div style={{
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              padding: '12px 14px',
+              borderRadius: '10px'
+            }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#1e293b', marginBottom: '8px' }}>
+                Commute Direction (Campus Centric) *
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setCommuteDirection('to_campus')}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: commuteDirection === 'to_campus' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                    background: commuteDirection === 'to_campus' ? '#eff6ff' : '#ffffff',
+                    color: commuteDirection === 'to_campus' ? '#1d4ed8' : '#475569',
+                    fontWeight: '700',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Towards GEHU Campus
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCommuteDirection('from_campus')}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: commuteDirection === 'from_campus' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                    background: commuteDirection === 'from_campus' ? '#eff6ff' : '#ffffff',
+                    color: commuteDirection === 'from_campus' ? '#1d4ed8' : '#475569',
+                    fontWeight: '700',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  From GEHU Campus
+                </button>
+              </div>
+            </div>
+
+            {/* If commute is From Campus: Origin is GEHU */}
+            {commuteDirection === 'from_campus' ? (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
+                  Departure Point (Fixed Campus Origin)
+                </label>
+                <div style={{
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  background: '#f1f5f9',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '0.85rem',
+                  color: '#334155',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <MapPin size={16} color="#059669" />
+                  <span><strong>Graphic Era Hill University (GEHU Campus)</strong>, Bell Road</span>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Landmark Selection (Pickup if to_campus, Dropoff corridor if from_campus) */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <label style={{ fontSize: '0.8rem', fontWeight: '600', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <MapPin size={15} color="#2563eb" />
-                  Origin / Departure Point *
+                  {commuteDirection === 'to_campus' ? 'Origin / Departure Point *' : 'Dropoff Corridor / Destination *'}
                 </label>
                 <div style={{ fontSize: '0.75rem', display: 'flex', gap: '8px' }}>
                   <span
@@ -431,7 +504,7 @@ export default function PostRideModal({ isOpen, onClose, onOpenVehicleModal, onR
               ) : (
                 <input
                   type="text"
-                  placeholder="e.g. Near Tea Stall, Ballupur Flyover"
+                  placeholder={commuteDirection === 'to_campus' ? "e.g. Near Tea Stall, Ballupur Flyover" : "e.g. Prem Nagar Market, Chakrata Road"}
                   value={customOrigin}
                   onChange={(e) => setCustomOrigin(e.target.value)}
                   style={{
@@ -445,26 +518,29 @@ export default function PostRideModal({ isOpen, onClose, onOpenVehicleModal, onR
               )}
             </div>
 
-            {/* Destination Point (Fixed as GEHU Campus per SRS) */}
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
-                Destination (Fixed Campus Commute)
-              </label>
-              <div style={{
-                padding: '10px 12px',
-                borderRadius: '8px',
-                background: '#f1f5f9',
-                border: '1px solid #e2e8f0',
-                fontSize: '0.85rem',
-                color: '#334155',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <MapPin size={16} color="#059669" />
-                <span><strong>Graphic Era Hill University (GEHU Campus)</strong>, Clement Town</span>
+            {/* If commute is To Campus: Destination is GEHU */}
+            {commuteDirection === 'to_campus' ? (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
+                  Destination (Fixed Campus Commute)
+                </label>
+                <div style={{
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  background: '#f1f5f9',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '0.85rem',
+                  color: '#334155',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <MapPin size={16} color="#059669" />
+                  <span><strong>Graphic Era Hill University (GEHU Campus)</strong>, Clement Town</span>
+                </div>
               </div>
-            </div>
+            ) : null}
+
 
             {/* Departure Time & Seats */}
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '12px' }}>

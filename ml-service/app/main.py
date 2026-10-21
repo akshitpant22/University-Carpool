@@ -17,17 +17,44 @@ class SimilarityResponse(BaseModel):
     success: bool
     results: List[SimilarityResult]
 
+# Global model cache to avoid re-instantiating 100MB+ model on every HTTP request
+_model_instance = None
+
+def get_model():
+    global _model_instance
+    if _model_instance is None:
+        from sentence_transformers import SentenceTransformer
+        model_name = os.getenv("MODEL_NAME", "all-MiniLM-L6-v2")
+        print(f"[ML Service] Loading SentenceTransformer model '{model_name}'...")
+        _model_instance = SentenceTransformer(model_name)
+        print(f"[ML Service] Model '{model_name}' ready.")
+    return _model_instance
+
+@app.on_event("startup")
+def preload_model():
+    """Attempt warm-up preload on startup if sentence_transformers is available"""
+    try:
+        get_model()
+    except Exception as e:
+        print(f"[ML Service Startup Warning] Could not preload model: {e}")
+
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "ml-similarity"}
+    model_ready = _model_instance is not None
+    return {
+        "status": "healthy",
+        "service": "ml-similarity",
+        "model_loaded": model_ready
+    }
 
 @app.post("/embed-similarity", response_model=SimilarityResponse)
 def compute_similarity(req: SimilarityRequest):
-    try:
-        from sentence_transformers import SentenceTransformer, util
+    if not req.candidate_texts:
+        return SimilarityResponse(success=True, results=[])
 
-        model_name = os.getenv("MODEL_NAME", "all-MiniLM-L6-v2")
-        model = SentenceTransformer(model_name)
+    try:
+        from sentence_transformers import util
+        model = get_model()
 
         query_emb = model.encode(req.query_text, convert_to_tensor=True)
         cand_embs = model.encode(req.candidate_texts, convert_to_tensor=True)
@@ -37,7 +64,7 @@ def compute_similarity(req: SimilarityRequest):
         results = [
             SimilarityResult(
                 candidate_text=cand,
-                similarity_score=float(cos_scores[idx])
+                similarity_score=max(0.0, min(1.0, float(cos_scores[idx])))
             )
             for idx, cand in enumerate(req.candidate_texts)
         ]
@@ -45,3 +72,4 @@ def compute_similarity(req: SimilarityRequest):
         return SimilarityResponse(success=True, results=results)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
