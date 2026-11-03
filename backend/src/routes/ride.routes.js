@@ -259,12 +259,13 @@ router.get('/search', verifyAuth, async (req, res) => {
       .select(`
         *,
         vehicles ( id, vehicle_type, vehicle_number, seat_capacity ),
-        users!rides_driver_id_fkey ( id, name, branch, course, profile_photo_url, composite_rating, completed_rides_count )
+        users!rides_driver_id_fkey ( id, name, gender, branch, course, profile_photo_url, composite_rating, completed_rides_count )
       `)
       .eq('status', 'posted')
       .is('deleted_at', null)
       .gt('available_seats', 0)
       .gte('departure_time', depWindowStart)
+      .gt('departure_time', new Date().toISOString())
       .lte('departure_time', depWindowEnd);
 
     // Only exclude rider's own rides if explicitly requested (in testing/driver view, we tag is_own_ride)
@@ -281,12 +282,12 @@ router.get('/search', verifyAuth, async (req, res) => {
         .select(`
           *,
           vehicles ( id, vehicle_type, vehicle_number, seat_capacity ),
-          users!rides_driver_id_fkey ( id, name, branch, course, profile_photo_url, composite_rating, completed_rides_count )
+          users!rides_driver_id_fkey ( id, name, gender, branch, course, profile_photo_url, composite_rating, completed_rides_count )
         `)
         .eq('status', 'posted')
         .is('deleted_at', null)
         .gt('available_seats', 0)
-        .gte('departure_time', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+        .gt('departure_time', new Date().toISOString())
         .order('departure_time', { ascending: true });
 
       if (fallbackQuery.data && fallbackQuery.data.length > 0) {
@@ -303,32 +304,15 @@ router.get('/search', verifyAuth, async (req, res) => {
     }
 
     // Enrich driver gender so mutual gender compatibility filter accurately matches same_gender_only rides
-    const safeRawRides = await Promise.all((rawRides || []).map(async (r) => {
-      let driverGender = r.users?.gender || r.driver_gender;
-      if (!driverGender) {
-        if (req.user?.id && r.driver_id === req.user.id) {
-          driverGender = req.user?.profile?.gender || req.user?.user_metadata?.gender || 'male';
-        } else {
-          try {
-            const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(r.driver_id);
-            driverGender = authUser?.user?.user_metadata?.gender || 'male';
-          } catch {
-            driverGender = 'male';
-          }
-        }
-      }
-      return {
-        ...r,
-        driver_gender: driverGender,
-        users: {
-          ...(r.users || {}),
-          gender: driverGender
-        }
-      };
-    }));
+    const safeRawRides = rawRides || [];
 
     // Step 2 & 3: Run through Matching Engine (Route Corridor Detour, Gender, ML similarity, 50/50 Fusion)
-    const { rankedRides, excludedByGenderCount } = await rankCandidateRides(safeRawRides, {
+   
+    const {
+      rankedRides,
+      excludedByGenderCount,
+      genderExcludedRides
+    } = await rankCandidateRides(safeRawRides, {
       pickup_lat,
       pickup_lng,
       pickup_address_text: pickup_address_text || '',
@@ -338,33 +322,26 @@ router.get('/search', verifyAuth, async (req, res) => {
       commute_direction,
       current_user_id: req.user?.id || null
     });
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        results: rankedRides,
-        total_matches: rankedRides.length,
-        excluded_by_gender_count: excludedByGenderCount,
-        query: {
-          pickup_address_text: pickup_address_text || '',
-          pickup_lat: pickup_lat ? parseFloat(pickup_lat) : null,
-          pickup_lng: pickup_lng ? parseFloat(pickup_lng) : null,
-          max_detour_meters: parseFloat(max_detour_meters) || 1500,
-          gender_preference,
-          commute_direction
+  return res.status(200).json({
+    success: true,
+    data: {
+      results: rankedRides,
+      total_matches: rankedRides.length,
+      excluded_by_gender_count: excludedByGenderCount,
+      gender_excluded_rides: genderExcludedRides
+    }
+    });
+    } catch (err) {
+      console.error('[GET /rides/search] Error:', err);
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'SERVER_ERROR',
+          message: err.message || 'Failed to search rides.'
         }
-      }
-    });
-  } catch (err) {
-    console.error('[GET /rides/search] Unexpected error:', err);
-    return res.status(500).json({
-      success: false,
-      error: { code: 'SERVER_ERROR', message: 'Failed to execute ride search.' }
-    });
-  }
-});
-
-
+      });
+    }
+    }); 
 /**
  * GET /api/v1/rides/:id
  * Retrieve details of a specific ride
@@ -378,7 +355,7 @@ router.get('/:id', verifyAuth, async (req, res) => {
       .select(`
         *,
         vehicles ( id, vehicle_type, vehicle_number, seat_capacity ),
-        users!rides_driver_id_fkey ( id, name, branch, course, profile_photo_url, composite_rating, completed_rides_count )
+        users!rides_driver_id_fkey ( id, name, gender, branch, course, profile_photo_url, composite_rating, completed_rides_count )
       `)
       .eq('id', id)
       .is('deleted_at', null)
@@ -402,7 +379,8 @@ router.get('/:id', verifyAuth, async (req, res) => {
       error: { code: 'SERVER_ERROR', message: 'Failed to fetch ride details.' }
     });
   }
-});
+  }
+);
 
 /**
  * PATCH /api/v1/rides/:id/cancel

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { api } from '../services/api.js';
 import {
   X,
   Star,
@@ -22,24 +23,30 @@ export default function SearchResultsModal({
   searchMeta,
   onModifySearch
 }) {
-  const [requestedRides, setRequestedRides] = useState(new Set());
-  const [requestSuccessMessage, setRequestSuccessMessage] = useState('');
+const [requestedRides, setRequestedRides] = useState(new Set());
+const [requestSuccessMessage, setRequestSuccessMessage] = useState('');
+const [showExcludedRides, setShowExcludedRides] = useState(false);
 
-  if (!isOpen || !searchData) return null;
+if (!isOpen || !searchData) return null;
 
-  const results = searchData.results || [];
-  const excludedByGender = searchData.excluded_by_gender_count || 0;
+const results = searchData.results || [];
+const excludedRides = searchData.gender_excluded_rides || [];
+const excludedByGender = searchData.excluded_by_gender_count || 0;
 
-  const handleRequestRide = (rideId, driverName) => {
-    // In Milestone 3, we validate ride selection and provide instant feedback.
-    // In Milestone 4, this connects to POST /api/v1/requests with atomic acceptance.
+const displayedRides = showExcludedRides ? excludedRides : results;
+  
+  const handleRequestRide = async (rideId, driverName) => {
+  try {
+    await api.post('/requests', {
+      ride_id: rideId
+    });
     setRequestedRides((prev) => new Set(prev).add(rideId));
-    setRequestSuccessMessage(
-      `Ride request submitted to ${driverName}! In Milestone 4, this triggers real-time driver notification and Socket.IO accept flow.`
-    );
-    setTimeout(() => {
-      setRequestSuccessMessage('');
-    }, 6000);
+    setRequestSuccessMessage(`Ride request submitted to ${driverName}!`);
+
+  } catch (error) {
+    console.error('Ride request failed:', error);
+    setRequestSuccessMessage(error.message || 'Unable to request this ride.');
+  }
   };
 
   return (
@@ -149,6 +156,24 @@ export default function SearchResultsModal({
                 <strong>Transparent Safety Notice:</strong> {excludedByGender} ride{excludedByGender > 1 ? 's' : ''} on this route {excludedByGender > 1 ? 'were' : 'was'} excluded by mutual gender filtering.
               </span>
             </div>
+            {results.length === 0 && excludedRides.length > 0 && (
+            <button
+              onClick={() => setShowExcludedRides((prev) => !prev)}
+              style={{
+                background: '#fff7ed',
+                border: '1px solid #fdba74',
+                borderRadius: '8px',
+                padding: '7px 10px',
+                color: '#9a3412',
+                fontWeight: '700',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+            {showExcludedRides ? 'Hide Excluded Rides' : 'View Excluded Rides'}
+          </button>
+            )}
             <button
               onClick={() => {
                 onClose();
@@ -177,7 +202,7 @@ export default function SearchResultsModal({
           flex: 1,
           background: '#f8fafc'
         }}>
-          {results.length === 0 ? (
+          {displayedRides.length === 0 ? (
             <div style={{
               textAlign: 'center',
               padding: '48px 24px',
@@ -231,7 +256,7 @@ export default function SearchResultsModal({
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {results.map((ride, index) => {
+              {displayedRides.map((ride, index) => {
                 const isRequested = requestedRides.has(ride.id);
                 const isRankOne = index === 0;
 

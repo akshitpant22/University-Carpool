@@ -8,6 +8,7 @@ import PostRideModal from './components/PostRideModal';
 import MyRidesModal from './components/MyRidesModal';
 import SearchRideModal from './components/SearchRideModal';
 import SearchResultsModal from './components/SearchResultsModal';
+import IncomingRequestsModal from './components/IncomingRequestsModal';
 import {
   Search,
   PlusCircle,
@@ -28,6 +29,7 @@ function Dashboard() {
   const [isVehicleOpen, setIsVehicleOpen] = useState(false);
   const [isPostRideOpen, setIsPostRideOpen] = useState(false);
   const [isMyRidesOpen, setIsMyRidesOpen] = useState(false);
+  const [isIncomingRequestsOpen, setIsIncomingRequestsOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isResultsOpen, setIsResultsOpen] = useState(false);
   const [searchData, setSearchData] = useState(null);
@@ -300,30 +302,30 @@ function Dashboard() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => setIsVehicleOpen(true)}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  background: '#f1f5f9',
-                  border: '1px solid #cbd5e1',
-                  color: '#1e293b',
-                  fontSize: '0.85rem',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Car size={16} color="#2563eb" />
-                <span>My Vehicles</span>
-              </button>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setIsVehicleOpen(true)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: '8px',
+                background: '#f1f5f9',
+                border: '1px solid #cbd5e1',
+                color: '#1e293b',
+                fontSize: '0.85rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Car size={16} color="#2563eb" />
+            <span>My Vehicles</span>
+          </button>
 
-              <button
-                onClick={() => setIsMyRidesOpen(true)}
-                style={{
+            <button
+              onClick={() => setIsMyRidesOpen(true)}
+              style={{
                   padding: '8px 14px',
                   borderRadius: '8px',
                   background: '#f1f5f9',
@@ -336,9 +338,29 @@ function Dashboard() {
                   alignItems: 'center',
                   gap: '6px'
                 }}
-              >
+            >
                 <Compass size={16} color="#2563eb" />
-                <span>My Rides</span>
+              <span>My Rides</span>
+            </button>
+
+            <button
+              onClick={() => setIsIncomingRequestsOpen(true)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: '8px',
+                background: '#f1f5f9',
+                border: '1px solid #cbd5e1',
+                color: '#1e293b',
+                fontSize: '0.85rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+                  <Users size={16} color="#2563eb" />
+                  <span>Incoming Requests</span>
               </button>
             </div>
           </div>
@@ -405,6 +427,11 @@ function Dashboard() {
       <MyRidesModal
         isOpen={isMyRidesOpen}
         onClose={() => setIsMyRidesOpen(false)}
+      />
+
+      <IncomingRequestsModal
+        isOpen={isIncomingRequestsOpen}
+        onClose={() => setIsIncomingRequestsOpen(false)}
       />
 
       <SearchRideModal

@@ -165,9 +165,42 @@ export function isGenderCompatible(riderPref, driverPref, riderGender, driverGen
 }
 
 /**
- * Robust Local String/Token Similarity Fallback
- * Used when Python ML microservice is unreachable or exceeds 2-second timeout.
- * Computes token-level Jaccard overlap + normalized edit distance.
+ * Calculates normalized Levenshtein similarity between two strings.
+ * Returns a score between 0 and 1.
+ */
+function levenshteinSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+
+  let previous = Array.from({ length: cols }, (_, i) => i);
+
+  for (let i = 1; i < rows; i++) {
+    const current = [i];
+
+    for (let j = 1; j < cols; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost
+      );
+    }
+
+    previous = current;
+  }
+
+  const distance = previous[cols - 1];
+  return 1 - distance / Math.max(a.length, b.length);
+}
+
+/**
+ * Local semantic similarity fallback.
+ * Combines token overlap, normalized Levenshtein similarity,
+ * and landmark phrase matching.
  */
 export function computeLocalStringSimilarity(queryText, candidateText) {
   if (!queryText || !candidateText) return 0.0;
@@ -180,63 +213,69 @@ export function computeLocalStringSimilarity(queryText, candidateText) {
       .replace(/graphic\s*era\s*(hill\s*)?university/g, 'gehu')
       .replace(/turner\s*road/g, 'clement town');
 
-  const normQ = normalizeAliases(queryText);
-  const normC = normalizeAliases(candidateText);
+  const normQ = normalizeAliases(queryText)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+   const normC = normalizeAliases(candidateText)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  // Generic stop words in location descriptions that carry little distinguishing value
+   if (!normQ || !normC) return 0;
+
   const stopWords = new Set([
-    'dehradun', 'doon', 'uttarakhand', 'road', 'rd', 'chowk', 'stand',
-    'near', 'opp', 'opposite', 'beside', 'campus', 'bypass', 'the', 'in', 'at'
+    'dehradun', 'doon', 'uttarakhand', 'road', 'rd',
+    'chowk', 'stand', 'near', 'opp', 'opposite',
+    'beside', 'campus', 'bypass', 'the', 'in', 'at'
   ]);
 
-  const tokenize = (str) =>
-    str.replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(Boolean);
+   const tokenize = (str) =>
+    str.split(/\s+/).filter(Boolean);
 
   const qAll = tokenize(normQ);
   const cAll = tokenize(normC);
 
-  if (qAll.length === 0 || cAll.length === 0) return 0.0;
+  const qCore = qAll.filter(t => !stopWords.has(t));
+  const cCore = cAll.filter(t => !stopWords.has(t));
 
-  // Focus primarily on landmark keywords
-  const qCore = qAll.filter((t) => !stopWords.has(t));
-  const cCore = cAll.filter((t) => !stopWords.has(t));
+  const qTokens = qCore.length ? qCore : qAll;
+  const cTokens = cCore.length ? cCore : cAll;
 
-  const qTokens = qCore.length > 0 ? qCore : qAll;
-  const cTokens = cCore.length > 0 ? cCore : cAll;
-  const cSet = new Set(cTokens);
+   // Token-level matching using the best Levenshtein match
+  let tokenSimilarityTotal = 0;
 
-  let coreMatches = 0;
-  for (const token of qTokens) {
-    if (cSet.has(token)) {
-      coreMatches += 1;
-    } else {
-      for (const cToken of cSet) {
-        if (cToken.includes(token) || token.includes(cToken)) {
-          coreMatches += 0.5;
-          break;
-        }
-      }
+  for (const qToken of qTokens) {
+    let bestMatch = 0;
+
+    for (const cToken of cTokens) {
+      bestMatch = Math.max(
+        bestMatch,
+        levenshteinSimilarity(qToken, cToken)
+      );
     }
+
+    tokenSimilarityTotal += bestMatch;
   }
 
-  // Query coverage & Dice similarity
-  const queryCoverage = coreMatches / qTokens.length;
-  const dice = (2 * coreMatches) / (qTokens.length + cTokens.length);
+  const tokenSimilarity = tokenSimilarityTotal / qTokens.length;
 
-  // Bigram / phrase matching bonus (e.g. 'clock tower')
-  let phraseBonus = 0;
-  for (let i = 0; i <= qTokens.length - 2; i++) {
-    const biGram = qTokens[i] + ' ' + qTokens[i + 1];
-    if (normC.includes(biGram)) {
-      phraseBonus += 0.25;
-      break;
-    }
-  }
+  // Normalized whole-string edit similarity
+  const editSimilarity = levenshteinSimilarity(normQ, normC);
 
-  const rawScore = (queryCoverage * 0.55) + (dice * 0.25) + phraseBonus;
-  return Math.min(1.0, Math.round(Math.max(0.0, rawScore) * 100) / 100);
+  // Landmark phrase bonus
+  const phraseMatch =
+    normC.includes(normQ) || normQ.includes(normC);
+
+  const phraseBonus = phraseMatch ? 0.10 : 0;
+
+  // Weighted local fallback score
+  const score =
+    (0.65 * tokenSimilarity) +
+    (0.35 * editSimilarity) +
+    phraseBonus;
+
+  return Math.round(Math.min(1, Math.max(0, score)) * 100) / 100;
 }
 
 
@@ -282,7 +321,7 @@ export async function computeSemanticSimilarities(queryAddress, candidateAddress
   } catch (err) {
     // Timeout or network connection error -> Graceful degradation to local string similarity
     // Search NEVER breaks or blocks!
-    // console.log(`[MatchingService] Notice: ML microservice offline or timeout (>2s), using local similarity engine.`);
+    console.log(`[MatchingService] ML microservice  unavailable or timed out. using local similarity fallback.`,err.message);
   }
 
   return fallbackScores();
@@ -354,6 +393,7 @@ export async function rankCandidateRides(candidateRides, queryParams) {
 
   let excludedByGenderCount = 0;
   const proximityFiltered = [];
+  const genderExcludedRides = [];
 
   // Campus anchor coords
   const GEHU_CAMPUS_LAT = 30.2704;
@@ -391,7 +431,7 @@ export async function rankCandidateRides(candidateRides, queryParams) {
     }
 
     // Step 2: Mutual Gender Filter
-    const driverGender = ride.users?.gender || ride.driver_gender || null;
+    const driverGender = ride.users?.gender || null;
     const isCompatible = isGenderCompatible(
       gender_preference,
       ride.gender_preference,
@@ -401,6 +441,14 @@ export async function rankCandidateRides(candidateRides, queryParams) {
 
     if (!isCompatible) {
       excludedByGenderCount++;
+      genderExcludedRides.push({
+        ...ride,
+        _parsed_origin: originCoords,
+        _parsed_dest: destCoords,
+        _ride_direction: rideDirection,
+        detour_distance_meters: detourMeters
+      });
+
       continue;
     }
 
@@ -413,16 +461,24 @@ export async function rankCandidateRides(candidateRides, queryParams) {
     });
   }
 
-  if (proximityFiltered.length === 0) {
-    return { rankedRides: [], excludedByGenderCount };
-  }
+    if (proximityFiltered.length === 0 && genderExcludedRides.length === 0) {
+      return {
+        rankedRides: [],
+        excludedByGenderCount,
+        genderExcludedRides: []
+      };
+    }
 
   // Step 3: Semantic Address Similarity (batched with 2s timeout & local fallback)
-  const candidateAddresses = proximityFiltered.map((r) => r.origin_address_text || '');
+ const allRidesToRank = [...proximityFiltered, ...genderExcludedRides];
+
+  const candidateAddresses = allRidesToRank.map(
+    (r) => r.origin_address_text || ''
+  );
   const similarityScores = await computeSemanticSimilarities(pickup_address_text, candidateAddresses);
 
   // Step 4: 50/50 Weighted Score-Level Fusion Scoring
-  const ranked = proximityFiltered.map((ride, idx) => {
+  const ranked = allRidesToRank.map((ride, idx) => {
     const compositeRating = ride.users?.composite_rating ?? 5.0;
     const normRating = normalizeRating(compositeRating);
     const normPrice = normalizePriceScore(ride.price_per_seat);
@@ -492,6 +548,22 @@ export async function rankCandidateRides(candidateRides, queryParams) {
     return b.semantic_similarity - a.semantic_similarity;
   });
 
-  return { rankedRides: ranked, excludedByGenderCount };
+  const excludedRideIds = new Set(
+  genderExcludedRides.map((ride) => ride.id)
+);
+
+  const rankedRides = ranked.filter(
+    (ride) => !excludedRideIds.has(ride.id)
+  );
+
+  const rankedGenderExcludedRides = ranked.filter(
+    (ride) => excludedRideIds.has(ride.id)
+  );
+
+  return {
+    rankedRides,
+    excludedByGenderCount,
+    genderExcludedRides: rankedGenderExcludedRides
+  };
 }
 
