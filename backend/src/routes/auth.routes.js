@@ -13,6 +13,7 @@ router.post('/signup', async (req, res) => {
       email,
       password,
       name,
+      gender,
       student_id_number,
       branch,
       course,
@@ -23,10 +24,10 @@ router.post('/signup', async (req, res) => {
       upi_id
     } = req.body;
 
-    if (!email || !password || !name || !student_id_number) {
+    if (!email || !password || !name || !student_id_number || !gender) {
       return res.status(400).json({
         success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Name, email, password, and Student ID are required.' }
+        error: { code: 'VALIDATION_ERROR', message: 'Name, gender,email, password, and Student ID are required.' }
       });
     }
 
@@ -92,7 +93,7 @@ router.post('/signup', async (req, res) => {
       email: email.toLowerCase().trim(),
       password,
       email_confirm: true, // auto-confirm for university pilot
-      user_metadata: { name, student_id_number }
+      user_metadata: { name, gender, student_id_number }
     });
 
     if (authError) {
@@ -111,6 +112,7 @@ router.post('/signup', async (req, res) => {
         id: userId,
         university_id: university.id,
         name: name.trim(),
+        gender: gender.trim().toLowerCase(),
         email: email.toLowerCase().trim(),
         student_id_number: student_id_number.trim(),
         branch: branch || null,

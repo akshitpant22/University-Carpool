@@ -39,11 +39,14 @@ export async function verifyAuth(req, res, next) {
       console.error('[verifyAuth] Database error fetching user profile:', dbError);
     }
 
-    // Attach to request
+    // Attach to request with gender from metadata if not present in profile table
+    const gender = profile?.gender || user.user_metadata?.gender || 'male';
     req.user = {
       id: user.id,
       email: user.email,
-      profile: profile || null,
+      user_metadata: user.user_metadata || {},
+      gender: gender,
+      profile: profile ? { ...profile, gender } : { gender },
       role: profile?.role || 'student',
       verification_status: profile?.verification_status || 'pending'
     };
