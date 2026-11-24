@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import vehicleRoutes from './routes/vehicle.routes.js';
 import rideRoutes from './routes/ride.routes.js';
+import requestRoutes from './routes/request.routes.js';
 
 dotenv.config();
 
@@ -66,6 +67,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/vehicles', vehicleRoutes);
 app.use('/api/v1/rides', rideRoutes);
+app.use('/api/v1/requests', requestRoutes);
 
 // System Health Check
 app.get('/api/v1/health', (req, res) => {

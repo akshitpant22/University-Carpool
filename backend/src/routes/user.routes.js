@@ -49,6 +49,10 @@ router.get('/me', verifyAuth, async (req, res) => {
       });
     }
 
+    if (user) {
+      user.gender = req.user.gender || 'male';
+    }
+
     return res.status(200).json({
       success: true,
       data: { user }

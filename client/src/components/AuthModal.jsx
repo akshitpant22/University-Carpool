@@ -14,6 +14,7 @@ export default function AuthModal({ isOpen, onClose, onSignupSuccess }) {
     email: '',
     password: '',
     name: '',
+    gender:'',
     student_id_number: '',
     course: 'B.Tech',
     branch: 'Computer Science (CSE)',
@@ -301,6 +302,29 @@ export default function AuthModal({ isOpen, onClose, onSignupSuccess }) {
                 />
               </div>
             </div>
+            <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '600', color: '#475569', marginBottom: '3px' }}>
+                  Gender *
+                </label>
+                <select
+                  name="gender"
+                  value={formData.gender}
+                  onChange={handleChange}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <option value="">Select Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
 
             <div>
               <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '600', color: '#475569', marginBottom: '3px' }}>
