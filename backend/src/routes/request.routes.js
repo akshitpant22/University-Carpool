@@ -2,6 +2,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { verifyAuth, requireVerified } from '../middleware/auth.js';
+import { createAndEmitNotification } from '../services/notification.service.js';
 
 const router = express.Router();
 
@@ -205,19 +206,17 @@ router.post('/', verifyAuth, requireVerified, async (req, res) => {
 
     const riderName = riderProfile?.name || 'A student';
 
-    // 6. Create a notification for the driver.
-    const { error: notificationError } = await supabaseAdmin
-      .from('notifications')
-      .insert({
-        user_id: ride.driver_id,
+    // 6. Create a notification for the driver changed to
+    // 6. Save the notification, then emit it to the driver's socket room.
+    try {
+      await createAndEmitNotification({
+        userId: ride.driver_id,
         type: 'general',
         title: 'New ride request',
         body: `${riderName} has requested a seat in your ride.`,
-        related_ride_id: ride_id,
-        is_read: false
+        relatedRideId: ride_id
       });
-
-    if (notificationError) {
+    } catch (notificationError) {
       // Avoid leaving a request without its corresponding notification.
       await supabaseAdmin
         .from('ride_requests')

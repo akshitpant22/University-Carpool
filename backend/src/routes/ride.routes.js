@@ -2,6 +2,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { verifyAuth, requireVerified } from '../middleware/auth.js';
 import { rankCandidateRides } from '../services/matching.service.js';
+import { getIO } from '../config/socket.js';
 
 const router = express.Router();
 
@@ -430,16 +431,31 @@ router.patch('/:id/cancel', verifyAuth, async (req, res) => {
       });
     }
 
-    // Auto-cancel any active/pending requests
-    await supabaseAdmin
-      .from('ride_requests')
-      .update({
-        status: 'cancelled_by_driver',
-        responded_at: new Date().toISOString()
-      })
-      .eq('ride_id', id)
-      .in('status', ['pending', 'accepted']);
+    // Auto-cancel any active/pending requests and notify affected riders via Socket.IO
+    const { data: cancelledRequests, error: requestCancelErr } =
+      await supabaseAdmin
+        .from('ride_requests')
+        .update({
+          status: 'cancelled_by_driver',
+          responded_at: new Date().toISOString()
+        })
+        .eq('ride_id', id)
+        .in('status', ['pending', 'accepted'])
+        .select('id, rider_id');
 
+    if (requestCancelErr) {
+      console.error('[Ride Cancellation] Request update failed:', requestCancelErr);
+    } else if (cancelledRequests?.length) {
+      const socket = getIO();
+
+      for (const request of cancelledRequests) {
+        socket.to(`user_${request.rider_id}`).emit('ride_cancelled', {
+          rideId: id,
+          requestId: request.id,
+          message: 'The driver has cancelled this ride.'
+        });
+      }
+    }
     return res.status(200).json({
       success: true,
       data: {

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { socket, connectSocket } from './socket';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import AuthModal from './components/AuthModal';
@@ -23,7 +24,45 @@ import {
 } from 'lucide-react';
 
 function Dashboard() {
-  const { user, profile } = useAuth();
+  const { user, profile, session } = useAuth();
+  useEffect(() => {
+    const accessToken = session?.access_token;
+
+    if (!user?.id || !accessToken) {
+      socket.disconnect();
+      return;
+    }
+
+    const handleConnect = () => {
+      console.log('[Socket.IO] Connected successfully');
+    };
+
+    const handleRideCancelled = (data) => {
+      alert(data.message);
+      console.log('Ride cancellation received:', data);
+    };
+
+    const handleNewNotification = (notification) => {
+      console.log('New notification received:', notification);
+
+      // Temporary notification display until we build the notification UI.
+      alert(`${notification.title}\n${notification.body}`);
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('ride_cancelled', handleRideCancelled);
+    socket.on('new_notification', handleNewNotification);
+
+    connectSocket(accessToken);
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('ride_cancelled', handleRideCancelled);
+      socket.off('new_notification', handleNewNotification);
+      socket.disconnect();
+    };
+  }, [user?.id, session?.access_token]);
+
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isIdUploadOpen, setIsIdUploadOpen] = useState(false);
   const [isVehicleOpen, setIsVehicleOpen] = useState(false);
