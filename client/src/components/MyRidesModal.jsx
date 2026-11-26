@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import ChatModal from './ChatModal';
 import {
   X,
   Car,
@@ -11,10 +12,12 @@ import {
   IndianRupee,
   AlertCircle,
   CheckCircle2,
-  XCircle
+  XCircle,
+  MessageCircle,
+  Navigation
 } from 'lucide-react';
 
-export default function MyRidesModal({ isOpen, onClose }) {
+export default function MyRidesModal({ isOpen, onClose, onRideDeparted }) {
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -41,6 +44,8 @@ export default function MyRidesModal({ isOpen, onClose }) {
     }
   }, [isOpen]);
 
+  const [chatTarget, setChatTarget] = useState(null); // { rideId, partnerId, partnerName, rideLabel }
+  const [departingId, setDepartingId] = useState(null);
   if (!isOpen) return null;
 
   const handleCancelRide = async (rideId) => {
@@ -63,6 +68,26 @@ export default function MyRidesModal({ isOpen, onClose }) {
     }
   };
 
+  const handleDepart = async (ride) => {
+    if (!window.confirm(
+      'Start this ride now? Pending requests will expire, chat will close, and your live location will be shared with accepted riders.'
+    )) return;
+
+    setDepartingId(ride.id);
+    setError('');
+    try {
+      const res = await api.patch(`/rides/${ride.id}/depart`);
+      if (res.success) {
+        await fetchMyRides();
+        if (onRideDeparted) onRideDeparted(ride.id);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to start ride.');
+    } finally {
+      setDepartingId(null);
+    }
+  };
+
   const formatDateTime = (isoString) => {
     const d = new Date(isoString);
     return d.toLocaleString('en-IN', {
@@ -71,6 +96,14 @@ export default function MyRidesModal({ isOpen, onClose }) {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const getRouteLabel = (r) => {
+    const text = r.origin_address_text || '';
+    // From-campus rides are already stored as "GEHU Campus → <destination>"
+    return text.startsWith('GEHU Campus')
+      ? text
+      : `${text} → GEHU Campus`;
   };
 
   const getStatusBadge = (status) => {
@@ -207,7 +240,7 @@ export default function MyRidesModal({ isOpen, onClose }) {
                         {badge.label}
                       </span>
                       <div style={{ fontWeight: '700', fontSize: '1rem', color: '#0f172a' }}>
-                        {r.origin_address_text} &rarr; GEHU Campus
+                        {getRouteLabel(r)}
                       </div>
                     </div>
 
@@ -245,6 +278,53 @@ export default function MyRidesModal({ isOpen, onClose }) {
                     </div>
                   </div>
 
+                  {r.status === 'posted' && r.accepted_riders?.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {r.accepted_riders.map((rider) => (
+                        <button
+                          key={rider.request_id}
+                          onClick={() => setChatTarget({
+                            rideId: r.id,
+                            partnerId: rider.rider_id,
+                            partnerName: rider.name,
+                            rideLabel: r.origin_address_text
+                          })}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px',
+                            borderRadius: '8px', background: '#eff6ff', border: '1px solid #bfdbfe',
+                            color: '#1d4ed8', fontSize: '0.8rem', fontWeight: 600
+                          }}
+                        >
+                          <MessageCircle size={14} /> Chat with {rider.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {r.status === 'posted' && r.accepted_riders?.length > 0 && (
+                    <button
+                      onClick={() => handleDepart(r)}
+                      disabled={departingId === r.id}
+                      style={{
+                        width: '100%', padding: '11px', borderRadius: '10px', background: '#16a34a',
+                        color: '#fff', fontWeight: 800, fontSize: '0.9rem', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', gap: '8px',
+                        opacity: departingId === r.id ? 0.6 : 1
+                      }}
+                    >
+                      <Navigation size={16} />
+                      {departingId === r.id ? 'Starting...' : "Start Ride (I'm departing)"}
+                    </button>
+                  )}
+                  {r.status === 'departed' && (
+                    <div style={{
+                      padding: '10px 12px', borderRadius: '8px', background: '#eff6ff',
+                      border: '1px solid #bfdbfe', color: '#1d4ed8', fontSize: '0.8rem', fontWeight: 600
+                    }}>
+                      Live location is being shared with your riders. Use the bar at the bottom to complete the ride.
+                    </div>
+                  )}
+
                   {r.status === 'posted' && !isPast && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f1f5f9', paddingTop: '8px' }}>
                       <button
@@ -275,6 +355,14 @@ export default function MyRidesModal({ isOpen, onClose }) {
           </div>
         )}
       </div>
+      <ChatModal
+        isOpen={!!chatTarget}
+        onClose={() => setChatTarget(null)}
+        rideId={chatTarget?.rideId}
+        partnerId={chatTarget?.partnerId}
+        partnerName={chatTarget?.partnerName}
+        rideLabel={chatTarget?.rideLabel}
+      />
     </div>
   );
 }

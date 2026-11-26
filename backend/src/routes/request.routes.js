@@ -82,6 +82,58 @@ router.get('/incoming', verifyAuth, async (req, res) => {
   }
 });
 
+// GET /api/v1/requests/mine
+// Rider's own requests, enriched with ride + driver info (used to open chat).
+router.get('/mine', verifyAuth, async (req, res) => {
+  try {
+    const riderId = req.user.id;
+
+    const { data: requests, error: reqError } = await supabaseAdmin
+      .from('ride_requests')
+      .select('id, ride_id, status, requested_at')
+      .eq('rider_id', riderId)
+      .is('deleted_at', null)
+      .order('requested_at', { ascending: false })
+      .limit(50);
+
+    if (reqError) throw reqError;
+
+    if (!requests || requests.length === 0) {
+      return res.status(200).json({ success: true, data: { requests: [] } });
+    }
+
+    const rideIds = [...new Set(requests.map(r => r.ride_id))];
+    const { data: rides, error: ridesError } = await supabaseAdmin
+      .from('rides')
+      .select('id, driver_id, origin_address_text, departure_time, price_per_seat, status')
+      .in('id', rideIds);
+
+    if (ridesError) throw ridesError;
+
+    const driverIds = [...new Set((rides || []).map(r => r.driver_id))];
+    const { data: drivers, error: driversError } = await supabaseAdmin
+      .from('users')
+      .select('id, name')
+      .in('id', driverIds);
+
+    if (driversError) throw driversError;
+
+    const enriched = requests.map(request => {
+      const ride = (rides || []).find(r => r.id === request.ride_id) || null;
+      const driver = ride ? (drivers || []).find(d => d.id === ride.driver_id) || null : null;
+      return { ...request, ride, driver };
+    });
+
+    return res.status(200).json({ success: true, data: { requests: enriched } });
+  } catch (error) {
+    console.error('[GET My Requests]', error);
+    return res.status(500).json({
+      success: false,
+      error: { message: error.message || 'Failed to fetch your requests.' }
+    });
+  }
+});
+
 // POST /api/v1/requests
 // Create a ride request and notify the driver.
 router.post('/', verifyAuth, requireVerified, async (req, res) => {

@@ -13,7 +13,8 @@ import vehicleRoutes from './routes/vehicle.routes.js';
 import rideRoutes from './routes/ride.routes.js';
 import requestRoutes from './routes/request.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
-
+import chatRoutes from './routes/chat.routes.js';
+import { restoreRide, getActiveRide, isRideStopped } from './services/liveRide.service.js';
 dotenv.config();
 
 const app = express();
@@ -136,13 +137,75 @@ io.on('connection', (socket) => {
 
       await socket.join(`ride_${rideId}`);
       socket.emit('ride_room_joined', { rideId });
-
+      const live = getActiveRide(rideId);
+      if (live?.lastLocation && live.driverId !== userId) {
+        socket.emit('ride_location', live.lastLocation);
+      }
       console.log(`[Socket.IO] ${userId} joined ride_${rideId}`);
     } catch (error) {
       console.error('[Socket.IO] Ride room error:', error);
       socket.emit('room_error', {
         message: 'Unable to join this ride room.'
       });
+    }
+  });
+
+    // Driver streams GPS. Relayed to ride_<id> only; never written to the DB.
+  socket.on('driver_location', async (payload) => {
+    try {
+      const { rideId, lat, lng, accuracy, speed, heading } = payload || {};
+      if (typeof rideId !== 'string') return;
+
+      const latN = Number(lat);
+      const lngN = Number(lng);
+      if (
+        !Number.isFinite(latN) || !Number.isFinite(lngN) ||
+        Math.abs(latN) > 90 || Math.abs(lngN) > 180
+      ) return;
+
+      let live = getActiveRide(rideId);
+
+      // Not in memory (e.g. server restarted mid-ride): verify once from the DB.
+      if (!live) {
+        // Completed/cancelled while we were running: drop without a DB hit
+        if (isRideStopped(rideId)) return;
+
+        const { data: ride } = await supabaseAdmin
+          .from('rides')
+          .select('id, driver_id, status')
+          .eq('id', rideId)
+          .is('deleted_at', null)
+          .maybeSingle();
+
+        if (!ride || ride.status !== 'departed' || ride.driver_id !== userId) return;
+
+        // Re-checked after the await: completion may have happened during the query
+        if (!restoreRide(rideId, userId)) return;
+        live = getActiveRide(rideId);
+      }
+
+      // Only the ride's driver may broadcast
+      if (!live || live.driverId !== userId) return;
+
+      // Server-side throttle
+      const now = Date.now();
+      if (now - live.lastEmitAt < 1500) return;
+      live.lastEmitAt = now;
+
+      const location = {
+        rideId,
+        lat: latN,
+        lng: lngN,
+        accuracy: Number.isFinite(accuracy) ? accuracy : null,
+        speed: Number.isFinite(speed) ? speed : null,
+        heading: Number.isFinite(heading) ? heading : null,
+        timestamp: now
+      };
+
+      live.lastLocation = location;
+      socket.to(`ride_${rideId}`).emit('ride_location', location);
+    } catch (error) {
+      console.error('[Socket.IO] driver_location error:', error);
     }
   });
 
@@ -158,6 +221,7 @@ app.use('/api/v1/vehicles', vehicleRoutes);
 app.use('/api/v1/rides', rideRoutes);
 app.use('/api/v1/requests', requestRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/chat', chatRoutes);
 
 // System Health Check
 app.get('/api/v1/health', (req, res) => {

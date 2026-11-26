@@ -3,6 +3,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { verifyAuth, requireVerified } from '../middleware/auth.js';
 import { rankCandidateRides } from '../services/matching.service.js';
 import { getIO } from '../config/socket.js';
+import { createAndEmitNotification } from '../services/notification.service.js';
+import { activateRide, deactivateRide } from '../services/liveRide.service.js';
 
 const router = express.Router();
 
@@ -185,7 +187,7 @@ router.get('/mine', verifyAuth, async (req, res) => {
       .select(`
         *,
         vehicles ( id, vehicle_type, vehicle_number, seat_capacity ),
-        ride_requests ( id, status, rider_id )
+        ride_requests ( id, status, rider_id, deleted_at )
       `)
       .eq('driver_id', req.user.id)
       .order('departure_time', { ascending: false });
@@ -197,10 +199,40 @@ router.get('/mine', verifyAuth, async (req, res) => {
       });
     }
 
+    const rideList = rides || [];
+    const acceptedRiderIds = [...new Set(
+      rideList.flatMap(r =>
+        (r.ride_requests || [])
+          .filter(rq => rq.status === 'accepted' && !rq.deleted_at)
+          .map(rq => rq.rider_id)
+      )
+    )];
+
+    let nameMap = {};
+    if (acceptedRiderIds.length > 0) {
+      const { data: riders } = await supabaseAdmin
+        .from('users')
+        .select('id, name')
+        .in('id', acceptedRiderIds);
+      nameMap = Object.fromEntries((riders || []).map(u => [u.id, u.name]));
+    }
+
+    const enriched = rideList.map(r => ({
+      ...r,
+      accepted_riders: (r.ride_requests || [])
+        .filter(rq => rq.status === 'accepted' && !rq.deleted_at)
+        .map(rq => ({
+          request_id: rq.id,
+          rider_id: rq.rider_id,
+          name: nameMap[rq.rider_id] || 'Student'
+        }))
+    }));
+
     return res.status(200).json({
       success: true,
-      data: { rides: rides || [] }
+      data: { rides: enriched }
     });
+
   } catch (err) {
     console.error('[GET /rides/mine] Error:', err);
     return res.status(500).json({
@@ -382,6 +414,159 @@ router.get('/:id', verifyAuth, async (req, res) => {
   }
   }
 );
+
+/**
+ * PATCH /api/v1/rides/:id/depart
+ * Driver starts the ride. Requires at least one accepted rider.
+ */
+router.patch('/:id/depart', verifyAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: accepted, error: acceptedErr } = await supabaseAdmin
+      .from('ride_requests')
+      .select('rider_id')
+      .eq('ride_id', id)
+      .eq('status', 'accepted')
+      .is('deleted_at', null);
+
+    if (acceptedErr) throw acceptedErr;
+
+    if (!accepted || accepted.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_ACCEPTED_RIDERS', message: 'Accept at least one rider before starting the ride.' }
+      });
+    }
+
+    // Atomic: flips only if the ride is still 'posted' and owned by this driver
+    const { data: ride, error: updateErr } = await supabaseAdmin
+      .from('rides')
+      .update({ status: 'departed' })
+      .eq('id', id)
+      .eq('driver_id', req.user.id)
+      .eq('status', 'posted')
+      .is('deleted_at', null)
+      .select('*')
+      .maybeSingle();
+
+    if (updateErr) throw updateErr;
+
+    if (!ride) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_STATUS', message: 'Ride not found, not yours, or already started.' }
+      });
+    }
+
+    // Leftover pending requests can no longer be fulfilled
+    await supabaseAdmin
+      .from('ride_requests')
+      .update({ status: 'expired', responded_at: new Date().toISOString() })
+      .eq('ride_id', id)
+      .eq('status', 'pending');
+
+    activateRide(id, req.user.id);
+
+    for (const rq of accepted) {
+      try {
+        await createAndEmitNotification({
+          userId: rq.rider_id,
+          type: 'ride_departed',
+          title: 'Your ride has departed',
+          body: 'The driver is on the way. Open My Requests to track live.',
+          relatedRideId: id
+        });
+        getIO().to(`user_${rq.rider_id}`).emit('ride_departed', { rideId: id });
+      } catch (notifyErr) {
+        console.error('[Depart] Notification failed:', notifyErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { ride, message: 'Ride started. Live location is now shared with your riders.' }
+    });
+  } catch (err) {
+    console.error('[PATCH /rides/:id/depart] Error:', err);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'SERVER_ERROR', message: 'Failed to start ride.' }
+    });
+  }
+});
+
+/**
+ * PATCH /api/v1/rides/:id/complete
+ * Driver completes a departed ride. Stops the live relay immediately.
+ * (Milestone 6.1 will extend this with the UPI QR flow.)
+ */
+router.patch('/:id/complete', verifyAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: ride, error: updateErr } = await supabaseAdmin
+      .from('rides')
+      .update({ status: 'completed' })
+      .eq('id', id)
+      .eq('driver_id', req.user.id)
+      .eq('status', 'departed')
+      .select('*')
+      .maybeSingle();
+
+    if (updateErr) throw updateErr;
+
+    if (!ride) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_STATUS', message: 'Only your own departed ride can be completed.' }
+      });
+    }
+
+    // 1. Stop accepting location updates right now
+    deactivateRide(id);
+
+    // 2. Tell riders, then kick everyone out of the ride room
+    const { data: accepted } = await supabaseAdmin
+      .from('ride_requests')
+      .select('rider_id')
+      .eq('ride_id', id)
+      .eq('status', 'accepted')
+      .is('deleted_at', null);
+
+    try {
+      const io = getIO();
+      for (const rq of accepted || []) {
+        io.to(`user_${rq.rider_id}`).emit('ride_completed', { rideId: id });
+        try {
+          await createAndEmitNotification({
+            userId: rq.rider_id,
+            type: 'ride_completed',
+            title: 'Ride completed',
+            body: 'Your ride has been marked as completed.',
+            relatedRideId: id
+          });
+        } catch (e) {
+          console.error('[Complete] Notification failed:', e.message);
+        }
+      }
+      io.in(`ride_${id}`).socketsLeave(`ride_${id}`);
+    } catch (socketErr) {
+      console.error('[Complete] Socket error:', socketErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { ride, message: 'Ride completed.' }
+    });
+  } catch (err) {
+    console.error('[PATCH /rides/:id/complete] Error:', err);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'SERVER_ERROR', message: 'Failed to complete ride.' }
+    });
+  }
+});
 
 /**
  * PATCH /api/v1/rides/:id/cancel

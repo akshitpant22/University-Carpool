@@ -10,6 +10,9 @@ import MyRidesModal from './components/MyRidesModal';
 import SearchRideModal from './components/SearchRideModal';
 import SearchResultsModal from './components/SearchResultsModal';
 import IncomingRequestsModal from './components/IncomingRequestsModal';
+import MyRequestsModal from './components/MyRequestsModal';
+import ActiveRideBar from './components/ActiveRideBar';
+import { api } from './services/api';
 import {
   Search,
   PlusCircle,
@@ -73,7 +76,22 @@ function Dashboard() {
   const [isResultsOpen, setIsResultsOpen] = useState(false);
   const [searchData, setSearchData] = useState(null);
   const [searchMeta, setSearchMeta] = useState(null);
+  const [isMyRequestsOpen, setIsMyRequestsOpen] = useState(false);
+  const [activeRideId, setActiveRideId] = useState(null);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setActiveRideId(null);
+      return;
+    }
+    api.get('/rides/mine')
+      .then((res) => {
+        const departed = (res.data?.rides || []).find((r) => r.status === 'departed');
+        setActiveRideId(departed?.id || null);
+      })
+      .catch(() => {});
+  }, [user?.id]);
+  
   const handleFindRide = () => {
     if (!user) {
       setIsAuthOpen(true);
@@ -401,6 +419,17 @@ function Dashboard() {
                   <Users size={16} color="#2563eb" />
                   <span>Incoming Requests</span>
               </button>
+              <button
+                onClick={() => setIsMyRequestsOpen(true)}
+                style={{
+                  padding: '8px 14px', borderRadius: '8px', background: '#f1f5f9',
+                  border: '1px solid #cbd5e1', color: '#1e293b', fontSize: '0.85rem',
+                  fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+                }}
+              >
+                <Search size={16} color="#2563eb" />
+                <span>My Requests</span>
+              </button>
             </div>
           </div>
         )}
@@ -466,6 +495,7 @@ function Dashboard() {
       <MyRidesModal
         isOpen={isMyRidesOpen}
         onClose={() => setIsMyRidesOpen(false)}
+        onRideDeparted={(rideId) => setActiveRideId(rideId)}
       />
 
       <IncomingRequestsModal
@@ -486,6 +516,17 @@ function Dashboard() {
         searchMeta={searchMeta}
         onModifySearch={() => setIsSearchOpen(true)}
       />
+
+      <MyRequestsModal
+        isOpen={isMyRequestsOpen}
+        onClose={() => setIsMyRequestsOpen(false)}
+      />
+
+      <ActiveRideBar
+        rideId={activeRideId}
+        onCompleted={() => setActiveRideId(null)}
+      />
+      
     </div>
   );
 }
