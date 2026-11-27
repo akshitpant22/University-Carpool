@@ -9,6 +9,8 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
 
 if (!supabaseUrl || supabaseUrl.includes('your-project') || !supabaseServiceRoleKey || supabaseServiceRoleKey.includes('your-service-role')) {
   console.warn('[Supabase Config Warning] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY contains placeholder values in backend/.env!');
@@ -24,3 +26,12 @@ export const supabaseAdmin = createClient(
     }
   }
 );
+
+// Short-lived client for end-user sign-in. Never reuse supabaseAdmin for this.
+export function createAuthClient() {
+  return createClient(
+    supabaseUrl || 'https://placeholder.supabase.co',
+    supabaseAnonKey || 'placeholder-key',
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+}

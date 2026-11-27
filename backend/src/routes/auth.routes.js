@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabaseAdmin } from '../config/supabase.js';
+import { supabaseAdmin, createAuthClient } from '../config/supabase.js';
 
 const router = express.Router();
 
@@ -169,7 +169,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+    const { data, error } = await createAuthClient().auth.signInWithPassword({
       email: email.toLowerCase().trim(),
       password
     });

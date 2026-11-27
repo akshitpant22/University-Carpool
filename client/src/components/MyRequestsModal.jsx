@@ -41,11 +41,15 @@ export default function MyRequestsModal({ isOpen, onClose }) {
     socket.on('ride_departed', refresh);
     socket.on('ride_completed', refresh);
     socket.on('ride_cancelled', refresh);
+    socket.on('driver_arrived', refresh);
+    socket.on('no_show_flagged', refresh);
 
     return () => {
       socket.off('ride_departed', refresh);
       socket.off('ride_completed', refresh);
       socket.off('ride_cancelled', refresh);
+      socket.off('driver_arrived', refresh);
+      socket.off('no_show_flagged', refresh);
     };
   }, [isOpen]);
 
@@ -99,7 +103,9 @@ export default function MyRequestsModal({ isOpen, onClose }) {
             // Show ride progress instead of a plain "Accepted"
             let badge = st;
             if (rq.status === 'accepted' && rq.ride?.status === 'departed') {
-              badge = { label: 'In transit', bg: '#eff6ff', color: '#1d4ed8' };
+              badge = rq.arrived_at
+                ? { label: 'Driver arrived', bg: '#fef3c7', color: '#92400e' }
+                : { label: 'In transit', bg: '#eff6ff', color: '#1d4ed8' };
             } else if (rq.status === 'accepted' && rq.ride?.status === 'completed') {
               badge = { label: 'Completed', bg: '#f1f5f9', color: '#475569' };
             }
@@ -124,6 +130,24 @@ export default function MyRequestsModal({ isOpen, onClose }) {
                     {badge.label}
                   </span>
                 </div>
+                
+                {rq.status === 'accepted' && rq.ride?.status === 'departed' && rq.arrived_at && (
+                  <div style={{
+                    marginTop: '12px', padding: '9px 11px', borderRadius: '8px', background: '#fffbeb',
+                    border: '1px solid #fde68a', color: '#92400e', fontSize: '0.8rem', fontWeight: 600
+                  }}>
+                    Your driver is waiting at the pickup point. Please head there now.
+                  </div>
+                )}
+
+                {rq.status === 'no_show' && (
+                  <div style={{
+                    marginTop: '12px', padding: '9px 11px', borderRadius: '8px', background: '#fef2f2',
+                    border: '1px solid #fecaca', color: '#b91c1c', fontSize: '0.8rem', fontWeight: 600
+                  }}>
+                    You were marked as a no-show. This lowers your reliability rating.
+                  </div>
+                )}
 
                 {canChat && (
                   <button
@@ -148,7 +172,8 @@ export default function MyRequestsModal({ isOpen, onClose }) {
                     onClick={() => setTrackTarget({
                       rideId: rq.ride_id,
                       driverName: rq.driver?.name,
-                      rideLabel: rq.ride.origin_address_text
+                      rideLabel: rq.ride.origin_address_text,
+                      arrivedAt: rq.arrived_at
                     })}
                     style={{
                       marginTop: '12px', display: 'flex', alignItems: 'center', gap: '6px',
@@ -179,6 +204,7 @@ export default function MyRequestsModal({ isOpen, onClose }) {
         rideId={trackTarget?.rideId}
         driverName={trackTarget?.driverName}
         rideLabel={trackTarget?.rideLabel}
+        arrivedAt={trackTarget?.arrivedAt}
       />
     </div>
   );

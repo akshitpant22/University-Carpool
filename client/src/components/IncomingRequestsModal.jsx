@@ -13,7 +13,8 @@ import {
   Inbox,
   AlertCircle,
   CheckCircle,
-  XCircle
+  XCircle,
+  Star
 } from 'lucide-react';
 
 export default function IncomingRequestsModal({ isOpen, onClose }) {
@@ -372,6 +373,18 @@ export default function IncomingRequestsModal({ isOpen, onClose }) {
                         rider?.course,
                         rider?.year ? `Year ${rider.year}` : null
                       ].filter(Boolean).join(' • ')}
+                    </div>
+                  )}
+                  {/*show rider reliability to drivers*/}
+                  {rider && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '7px', color: '#475569',
+                      fontSize: '13px', marginBottom: '15px'
+                    }}>
+                      <Star size={16} color="#f59e0b" fill="#f59e0b" />
+                      {Number(rider.composite_rating ?? 5).toFixed(1)} reliability
+                      {rider.no_show_count > 0 &&
+                        ` • ${rider.no_show_count} no-show${rider.no_show_count > 1 ? 's' : ''}`}
                     </div>
                   )}
 

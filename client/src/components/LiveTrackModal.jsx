@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 import { X, MapPin, Navigation, AlertCircle, CheckCircle2 } from 'lucide-react';
 
-export default function LiveTrackModal({ isOpen, onClose, rideId, driverName, rideLabel }) {
-  const [location, setLocation] = useState(null); // includes receivedAt (client clock)
+export default function LiveTrackModal({ isOpen, onClose, rideId, driverName, rideLabel, arrivedAt }) {  const [location, setLocation] = useState(null); // includes receivedAt (client clock)
   const [ended, setEnded] = useState('');         // '' | 'completed' | 'cancelled'
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [arrived, setArrived] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !rideId) return;
@@ -14,6 +14,7 @@ export default function LiveTrackModal({ isOpen, onClose, rideId, driverName, ri
     setLocation(null);
     setEnded('');
     setError('');
+    setArrived(Boolean(arrivedAt));
 
     const join = () => socket.emit('join_ride_room', rideId);
     const onLocation = (loc) => {
@@ -21,12 +22,16 @@ export default function LiveTrackModal({ isOpen, onClose, rideId, driverName, ri
     };
     const onCompleted = (d) => { if (d.rideId === rideId) setEnded('completed'); };
     const onCancelled = (d) => { if (d.rideId === rideId) setEnded('cancelled'); };
+    const onArrived = (d) => { if (d.rideId === rideId) setArrived(true); };
+    const onNoShow = (d) => { if (d.rideId === rideId) setEnded('no_show'); };
     const onRoomError = (d) => setError(d?.message || 'Unable to join live tracking.');
 
     socket.on('connect', join); // rooms are lost on reconnect, so re-join
     socket.on('ride_location', onLocation);
     socket.on('ride_completed', onCompleted);
     socket.on('ride_cancelled', onCancelled);
+    socket.on('driver_arrived', onArrived);
+    socket.on('no_show_flagged', onNoShow);
     socket.on('room_error', onRoomError);
 
     if (socket.connected) join();
@@ -38,6 +43,8 @@ export default function LiveTrackModal({ isOpen, onClose, rideId, driverName, ri
       socket.off('ride_location', onLocation);
       socket.off('ride_completed', onCompleted);
       socket.off('ride_cancelled', onCancelled);
+      socket.off('driver_arrived', onArrived);
+      socket.off('no_show_flagged', onNoShow);
       socket.off('room_error', onRoomError);
       clearInterval(tick);
     };
@@ -82,11 +89,26 @@ export default function LiveTrackModal({ isOpen, onClose, rideId, driverName, ri
           </div>
         )}
 
+        {arrived && !ended && (
+          <div style={{
+            display: 'flex', gap: '8px', alignItems: 'center', padding: '10px 12px', borderRadius: '8px',
+            background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e',
+            fontSize: '0.82rem', fontWeight: 600, marginBottom: '12px'
+          }}>
+            <MapPin size={16} />
+            <span>Your driver has arrived at the pickup point. Please head there now.</span>
+          </div>
+        )}
+
         {ended ? (
           <div style={{ padding: '20px', textAlign: 'center', borderRadius: '12px', background: ended === 'completed' ? '#ecfdf5' : '#fef2f2' }}>
             <CheckCircle2 size={34} color={ended === 'completed' ? '#059669' : '#b91c1c'} style={{ margin: '0 auto 8px' }} />
             <div style={{ fontWeight: 800, color: '#0f172a' }}>
-              {ended === 'completed' ? 'Ride completed' : 'Ride cancelled by driver'}
+              {ended === 'completed'
+                ? 'Ride completed'
+                : ended === 'no_show'
+                  ? 'You were marked as a no-show'
+                  : 'Ride cancelled by driver'}
             </div>
             <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>Live tracking has stopped.</div>
           </div>

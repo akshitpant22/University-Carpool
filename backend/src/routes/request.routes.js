@@ -3,9 +3,11 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { verifyAuth, requireVerified } from '../middleware/auth.js';
 import { createAndEmitNotification } from '../services/notification.service.js';
+import { getIO } from '../config/socket.js';
 
 const router = express.Router();
-
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NO_SHOW_PENALTY = 0.5; // rating points per no-show (floor of 1.0 is enforced in SQL)
 // GET /api/v1/requests/incoming
 // Fetch pending requests for rides posted by the logged-in driver.
 router.get('/incoming', verifyAuth, async (req, res) => {
@@ -53,7 +55,7 @@ router.get('/incoming', verifyAuth, async (req, res) => {
 
     const { data: riders, error: ridersError } = await supabaseAdmin
       .from('users')
-      .select('id, name, email, branch, course, year, profile_photo_url')
+      .select('id, name, email, branch, course, year, profile_photo_url, composite_rating, no_show_count')
       .in('id', riderIds);
 
     if (ridersError) throw ridersError;
@@ -90,7 +92,7 @@ router.get('/mine', verifyAuth, async (req, res) => {
 
     const { data: requests, error: reqError } = await supabaseAdmin
       .from('ride_requests')
-      .select('id, ride_id, status, requested_at')
+      .select('id, ride_id, status, requested_at, arrived_at')
       .eq('rider_id', riderId)
       .is('deleted_at', null)
       .order('requested_at', { ascending: false })
@@ -356,6 +358,284 @@ router.patch('/:id/respond', verifyAuth, async (req, res) => {
       error: {
         message: error.message || 'Failed to respond to request.'
       }
+    });
+  }
+});
+
+// GET /api/v1/requests/pickups?ride_id=<uuid>
+// Driver's pickup list for a ride: accepted riders and already-flagged no-shows.
+router.get('/pickups', verifyAuth, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const rideId = req.query.ride_id;
+
+    if (typeof rideId !== 'string' || !UUID_RE.test(rideId)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'A valid ride_id is required.' }
+      });
+    }
+
+    const { data: ride, error: rideError } = await supabaseAdmin
+      .from('rides')
+      .select('id, driver_id, status, origin_address_text')
+      .eq('id', rideId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (rideError) throw rideError;
+
+    if (!ride) {
+      return res.status(404).json({ success: false, error: { message: 'Ride not found.' } });
+    }
+
+    if (ride.driver_id !== driverId) {
+      return res.status(403).json({ success: false, error: { message: 'Only the driver can view pickups.' } });
+    }
+
+    const { data: requests, error: requestsError } = await supabaseAdmin
+      .from('ride_requests')
+      .select('id, rider_id, status, arrived_at, requested_at')
+      .eq('ride_id', rideId)
+      .in('status', ['accepted', 'no_show'])
+      .is('deleted_at', null)
+      .order('requested_at', { ascending: true });
+
+    if (requestsError) throw requestsError;
+
+    const list = requests || [];
+    let nameMap = {};
+
+    if (list.length > 0) {
+      const { data: riders, error: ridersError } = await supabaseAdmin
+        .from('users')
+        .select('id, name')
+        .in('id', [...new Set(list.map((r) => r.rider_id))]);
+
+      if (ridersError) throw ridersError;
+      nameMap = Object.fromEntries((riders || []).map((u) => [u.id, u.name]));
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ride: {
+          id: ride.id,
+          status: ride.status,
+          origin_address_text: ride.origin_address_text
+        },
+        pickups: list.map((rq) => ({
+          request_id: rq.id,
+          rider_id: rq.rider_id,
+          name: nameMap[rq.rider_id] || 'Student',
+          status: rq.status,
+          arrived_at: rq.arrived_at
+        })),
+        // lets the client correct for a wrong phone clock when showing "waited N min"
+        server_time: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('[GET Pickups]', error);
+    return res.status(500).json({
+      success: false,
+      error: { message: error.message || 'Failed to load pickups.' }
+    });
+  }
+});
+
+// PATCH /api/v1/requests/:id/arrived
+// Driver reports arriving at this rider's pickup point. Idempotent.
+router.patch('/:id/arrived', verifyAuth, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const requestId = req.params.id;
+
+    if (!UUID_RE.test(requestId)) {
+      return res.status(400).json({ success: false, error: { message: 'Invalid request id.' } });
+    }
+
+    const { data: request, error: requestError } = await supabaseAdmin
+      .from('ride_requests')
+      .select('id, ride_id, rider_id, status, arrived_at')
+      .eq('id', requestId)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (requestError) throw requestError;
+
+    if (!request) {
+      return res.status(404).json({ success: false, error: { message: 'Request not found.' } });
+    }
+
+    const { data: ride, error: rideError } = await supabaseAdmin
+      .from('rides')
+      .select('id, driver_id, status')
+      .eq('id', request.ride_id)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (rideError) throw rideError;
+
+    if (!ride) {
+      return res.status(404).json({ success: false, error: { message: 'Ride not found.' } });
+    }
+
+    if (ride.driver_id !== driverId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'NOT_RIDE_DRIVER', message: 'Only the driver of this ride can mark arrival.' }
+      });
+    }
+
+    if (ride.status !== 'departed') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'RIDE_NOT_DEPARTED', message: 'Start the ride before marking arrival.' }
+      });
+    }
+
+    if (request.status !== 'accepted') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'REQUEST_NOT_ACCEPTED', message: 'This rider is not an accepted passenger.' }
+      });
+    }
+
+    // Already marked: succeed without resetting the wait timer or re-notifying
+    if (request.arrived_at) {
+      return res.status(200).json({
+        success: true,
+        data: { request_id: request.id, arrived_at: request.arrived_at, already_marked: true }
+      });
+    }
+
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('ride_requests')
+      .update({ arrived_at: new Date().toISOString() })
+      .eq('id', requestId)
+      .eq('status', 'accepted')
+      .is('arrived_at', null)
+      .select('id, arrived_at')
+      .maybeSingle();
+
+    if (updateError) throw updateError;
+
+    if (!updated) {
+      return res.status(409).json({
+        success: false,
+        error: { message: 'This request just changed. Refresh and try again.' }
+      });
+    }
+
+    // Notification failure must never undo the arrival
+    try {
+      await createAndEmitNotification({
+        userId: request.rider_id,
+        type: 'general',
+        title: 'Your driver has arrived',
+        body: 'Your driver is waiting at the pickup point. Please head there now.',
+        relatedRideId: ride.id
+      });
+      getIO().to(`user_${request.rider_id}`).emit('driver_arrived', {
+        rideId: ride.id,
+        requestId: request.id,
+        arrivedAt: updated.arrived_at
+      });
+    } catch (notifyError) {
+      console.error('[Arrived] Notification failed:', notifyError.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { request_id: updated.id, arrived_at: updated.arrived_at }
+    });
+  } catch (error) {
+    console.error('[PATCH Arrived]', error);
+    return res.status(500).json({
+      success: false,
+      error: { message: error.message || 'Failed to mark arrival.' }
+    });
+  }
+});
+
+// PATCH /api/v1/requests/:id/no-show
+// Driver flags a rider who did not show up at the pickup point.
+router.patch('/:id/no-show', verifyAuth, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const requestId = req.params.id;
+
+    if (!UUID_RE.test(requestId)) {
+      return res.status(400).json({ success: false, error: { message: 'Invalid request id.' } });
+    }
+
+    const { data, error } = await supabaseAdmin.rpc('flag_rider_no_show', {
+      p_request_id: requestId,
+      p_driver_id: driverId,
+      p_penalty: NO_SHOW_PENALTY
+    });
+
+    if (error) {
+      const known = [
+        ['REQUEST_NOT_FOUND',     404, 'Request not found.'],
+        ['RIDE_NOT_FOUND',        404, 'Ride not found.'],
+        ['NOT_RIDE_DRIVER',       403, 'Only the driver of this ride can flag a no-show.'],
+        ['RIDE_NOT_DEPARTED',     400, 'The ride must be in progress to flag a no-show.'],
+        ['REQUEST_NOT_ACCEPTED',  409, 'This rider is no longer an accepted passenger.'],
+        ['NOT_ARRIVED',           400, 'Mark that you have arrived at the pickup point first.']
+      ];
+      const hit = known.find(([code]) => (error.message || '').includes(code));
+
+      if (hit) {
+        return res.status(hit[1]).json({
+          success: false,
+          error: { code: hit[0], message: hit[2] }
+        });
+      }
+      throw error;
+    }
+
+    const result = Array.isArray(data) ? data[0] : data;
+    const rideId = result.ride_id;
+    const riderId = result.rider_id;
+
+    // Tell the rider, then cut them off from the live GPS room
+    try {
+      const io = getIO();
+      io.to(`user_${riderId}`).emit('no_show_flagged', { rideId, requestId });
+      io.in(`user_${riderId}`).socketsLeave(`ride_${rideId}`);
+    } catch (socketError) {
+      console.error('[NoShow] Socket cleanup failed:', socketError.message);
+    }
+
+    try {
+      await createAndEmitNotification({
+        userId: riderId,
+        type: 'no_show_flagged',
+        title: 'Marked as no-show',
+        body: 'Your driver reported that you were not at the pickup point. This lowers your reliability rating.',
+        relatedRideId: rideId
+      });
+    } catch (notifyError) {
+      console.error('[NoShow] Notification failed:', notifyError.message);
+    }
+
+    // The driver gets confirmation only, not the rider's new score
+    return res.status(200).json({
+      success: true,
+      data: {
+        request_id: requestId,
+        status: 'no_show',
+        waited_seconds: result.waited_seconds,
+        message: 'Rider marked as no-show.'
+      }
+    });
+  } catch (error) {
+    console.error('[PATCH No-Show]', error);
+    return res.status(500).json({
+      success: false,
+      error: { message: error.message || 'Failed to flag no-show.' }
     });
   }
 });
